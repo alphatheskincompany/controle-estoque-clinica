@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Trash2, Plus, Syringe, Users, BarChart3, 
   AlertTriangle, CheckCircle, Package, ArrowRight,
-  Droplets, Pill, Activity, Calendar, Search, Filter, X, History, Clock, Repeat, RotateCcw, Upload, CalendarClock, Minus
+  Droplets, Pill, Activity, Calendar, Search, Filter, X, History, Clock, Repeat, RotateCcw, Upload, CalendarClock, Minus, Edit2, Save
 } from 'lucide-react';
 
 // Importações do Firebase
@@ -106,17 +106,15 @@ export default function ClinicStockApp() {
     }
   };
 
-  // Nova função para importar CSV
   const handleImportCSV = async (csvText) => {
     if (!user) return;
     try {
       const rows = csvText.split('\n');
-      const batch = writeBatch(db); // Usa batch para ser rápido e seguro
+      const batch = writeBatch(db);
       let count = 0;
 
       rows.forEach(row => {
         const cols = row.split(',').map(c => c.trim());
-        // Espera formato: Nome, Unidade, QtdInicial, Minimo
         if (cols.length >= 3) {
           const newItemRef = doc(collection(db, 'inventory'));
           batch.set(newItemRef, {
@@ -163,10 +161,8 @@ export default function ClinicStockApp() {
     await deleteDoc(doc(db, 'inventory', id));
   };
 
-  // Atualizado para receber múltiplos itens (protocolo combinado)
   const handleSchedulePatient = async (patientData) => {
     if (!user) return;
-    // patientData agora tem um array 'items' em vez de medicationId/dose únicos
     await addDoc(collection(db, 'schedule'), {
       ...patientData,
       status: 'scheduled', 
@@ -174,16 +170,29 @@ export default function ClinicStockApp() {
     });
   };
 
+  // NOVA FUNÇÃO: Editar Agendamento
+  const handleEditSchedule = async (id, updatedData) => {
+    if (!user) return;
+    try {
+      const scheduleRef = doc(db, 'schedule', id);
+      await updateDoc(scheduleRef, {
+        ...updatedData,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Erro ao editar agendamento:", error);
+      alert("Erro ao salvar alterações.");
+    }
+  };
+
   const handleApply = async (appointment, actualDateString) => {
     if (!user) return;
     
-    // Suporte a legado (se tiver medicationId solto) ou novo (array items)
     const itemsToProcess = appointment.items || [{ 
       medicationId: appointment.medicationId, 
       dose: appointment.dose 
     }];
 
-    // 1. Verificação de Estoque para TODOS os itens primeiro
     for (const reqItem of itemsToProcess) {
       const stockItem = inventory.find(i => i.id === reqItem.medicationId);
       if (!stockItem) {
@@ -202,7 +211,6 @@ export default function ClinicStockApp() {
       datePart.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
       const finalDate = Timestamp.fromDate(datePart);
 
-      // 2. Subtrair do estoque (Batch para garantir que ou vai tudo ou não vai nada)
       const batch = writeBatch(db);
       
       itemsToProcess.forEach(reqItem => {
@@ -210,7 +218,6 @@ export default function ClinicStockApp() {
         batch.update(itemRef, { quantity: increment(-Number(reqItem.dose)) });
       });
 
-      // 3. Atualizar agendamento
       const scheduleRef = doc(db, 'schedule', appointment.id);
       batch.update(scheduleRef, {
         status: 'applied',
@@ -237,12 +244,10 @@ export default function ClinicStockApp() {
 
       const batch = writeBatch(db);
 
-      // 1. Devolver ao estoque
       itemsToProcess.forEach(reqItem => {
         const itemRef = doc(db, 'inventory', reqItem.medicationId);
         batch.update(itemRef, { quantity: increment(Number(reqItem.dose)) });
         
-        // Log de estorno (opcional, faremos um log separado por ser batch)
         const newLogRef = doc(collection(db, 'stock_logs'));
         const stockItem = inventory.find(i => i.id === reqItem.medicationId);
         batch.set(newLogRef, {
@@ -254,7 +259,6 @@ export default function ClinicStockApp() {
         });
       });
 
-      // 2. Voltar status
       const scheduleRef = doc(db, 'schedule', appointment.id);
       batch.update(scheduleRef, {
         status: 'scheduled',
@@ -327,6 +331,7 @@ export default function ClinicStockApp() {
             inventory={inventory} 
             schedule={schedule} 
             onSchedule={handleSchedulePatient}
+            onEdit={handleEditSchedule} // Passando a nova função
             onApply={handleApply}
             onUndo={handleUndoApply} 
             onDelete={handleDeleteSchedule}
@@ -455,15 +460,11 @@ function InventoryTab({ inventory, stockLogs, onAdd, onImport, onDelete, onUpdat
         </div>
       </div>
 
-      {/* Modal Importação CSV */}
       {isImporting && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
             <h3 className="text-lg font-bold text-slate-700 mb-2">Importar Planilha (.csv)</h3>
-            <p className="text-xs text-slate-500 mb-4">
-              O arquivo deve ter as colunas separadas por vírgula na ordem: <br/>
-              <strong>Nome, Unidade, Qtd Inicial, Minimo</strong>
-            </p>
+            <p className="text-xs text-slate-500 mb-4">Colunas: <strong>Nome, Unidade, Qtd Inicial, Minimo</strong></p>
             <div className="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center bg-slate-50 hover:bg-slate-100 transition-colors relative cursor-pointer">
               <input type="file" accept=".csv" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileChange} />
               <Upload className="mx-auto text-slate-400 mb-2" />
@@ -474,7 +475,6 @@ function InventoryTab({ inventory, stockLogs, onAdd, onImport, onDelete, onUpdat
         </div>
       )}
 
-      {/* Modal Entrada Estoque */}
       {stockEntryItem && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
@@ -495,7 +495,6 @@ function InventoryTab({ inventory, stockLogs, onAdd, onImport, onDelete, onUpdat
         </div>
       )}
 
-      {/* Modal Confirmação Exclusão */}
       {deleteItem && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm text-center">
@@ -510,7 +509,6 @@ function InventoryTab({ inventory, stockLogs, onAdd, onImport, onDelete, onUpdat
         </div>
       )}
 
-      {/* Modal Histórico */}
       {historyItem && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md max-h-[80vh] flex flex-col">
@@ -602,8 +600,7 @@ function InventoryTab({ inventory, stockLogs, onAdd, onImport, onDelete, onUpdat
 }
 
 // --- ABA ENFERMARIA (AGENDA COM PROTOCOLOS COMBINADOS) ---
-function ScheduleTab({ inventory, schedule, onSchedule, onApply, onUndo, onDelete }) {
-  // Estado inicial modificado para lista de medicamentos
+function ScheduleTab({ inventory, schedule, onSchedule, onEdit, onApply, onUndo, onDelete }) {
   const [newPatient, setNewPatient] = useState({ 
     patientName: '', 
     items: [{ id: Date.now(), medicationId: '', dose: '' }],
@@ -613,87 +610,87 @@ function ScheduleTab({ inventory, schedule, onSchedule, onApply, onUndo, onDelet
 
   const [applyModalItem, setApplyModalItem] = useState(null);
   const [applyDate, setApplyDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  // Estado para Edição
+  const [editingItem, setEditingItem] = useState(null);
 
-  // Função para adicionar linha de medicamento no formulário
-  const addMedLine = () => {
-    setNewPatient({
-      ...newPatient,
-      items: [...newPatient.items, { id: Date.now(), medicationId: '', dose: '' }]
+  // Funções para adicionar/remover/atualizar no formulário principal
+  const addMedLine = () => setNewPatient({ ...newPatient, items: [...newPatient.items, { id: Date.now(), medicationId: '', dose: '' }] });
+  const removeMedLine = (id) => { if (newPatient.items.length === 1) return; setNewPatient({ ...newPatient, items: newPatient.items.filter(i => i.id !== id) }); };
+  const updateMedLine = (id, field, value) => setNewPatient({ ...newPatient, items: newPatient.items.map(i => i.id === id ? { ...i, [field]: value } : i) });
+
+  // Funções para o Modal de Edição (Cópia da lógica acima mas para o editingItem)
+  const addEditMedLine = () => setEditingItem({ ...editingItem, items: [...(editingItem.items || []), { id: Date.now(), medicationId: '', dose: '' }] });
+  const removeEditMedLine = (idxToRemove) => {
+    // Se só tem 1 e tenta remover, pode limpar ou impedir. Vamos permitir limpar mas alertar no save.
+    const newItems = editingItem.items.filter((_, idx) => idx !== idxToRemove);
+    setEditingItem({ ...editingItem, items: newItems });
+  };
+  const updateEditMedLine = (idxToUpdate, field, value) => {
+    const newItems = editingItem.items.map((item, idx) => idx === idxToUpdate ? { ...item, [field]: value } : item);
+    setEditingItem({ ...editingItem, items: newItems });
+  };
+
+  const handleStartEdit = (item) => {
+    // Prepara o objeto para edição. Garante que 'items' exista (migração de dados antigos)
+    const items = item.items || [{ medicationId: item.medicationId, dose: item.dose }];
+    // Mapeia para garantir estrutura correta
+    const formattedItems = items.map(i => ({ ...i, id: i.id || Math.random() })); // Adiciona ID temporário se não tiver
+    
+    setEditingItem({
+      ...item,
+      items: formattedItems,
+      date: item.date // Mantém a data original
     });
   };
 
-  // Função para remover linha
-  const removeMedLine = (id) => {
-    if (newPatient.items.length === 1) return;
-    setNewPatient({
-      ...newPatient,
-      items: newPatient.items.filter(i => i.id !== id)
+  const handleSaveEdit = () => {
+    if (!editingItem.patientName || editingItem.items.length === 0) {
+      alert("Preencha o nome e pelo menos um medicamento.");
+      return;
+    }
+    // Remove IDs temporários e salva
+    const cleanItems = editingItem.items.map(({ id, ...rest }) => rest);
+    
+    onEdit(editingItem.id, {
+      patientName: editingItem.patientName,
+      date: editingItem.date,
+      items: cleanItems
     });
-  };
-
-  // Função para atualizar linha
-  const updateMedLine = (id, field, value) => {
-    setNewPatient({
-      ...newPatient,
-      items: newPatient.items.map(i => i.id === id ? { ...i, [field]: value } : i)
-    });
+    setEditingItem(null);
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
     const startDate = new Date(newPatient.date);
-    
-    // Limpa dados vazios antes de salvar
     const cleanItems = newPatient.items.filter(i => i.medicationId && i.dose);
-    if (cleanItems.length === 0) {
-      alert("Selecione pelo menos um insumo e dose.");
-      return;
-    }
+    if (cleanItems.length === 0) { alert("Selecione pelo menos um insumo e dose."); return; }
 
     for (let i = 0; i < newPatient.sessions; i++) {
       const appointmentDate = new Date(startDate);
       appointmentDate.setDate(startDate.getDate() + (i * 7));
-      
       onSchedule({
         patientName: newPatient.patientName,
-        items: cleanItems, // Salva o array de medicamentos
+        items: cleanItems,
         date: appointmentDate.toISOString().split('T')[0],
         sessionInfo: newPatient.sessions > 1 ? `${i + 1}/${newPatient.sessions}` : null
       });
     }
-
-    setNewPatient({ 
-      patientName: '', 
-      items: [{ id: Date.now(), medicationId: '', dose: '' }],
-      sessions: 1,
-      date: new Date().toISOString().split('T')[0]
-    });
+    setNewPatient({ patientName: '', items: [{ id: Date.now(), medicationId: '', dose: '' }], sessions: 1, date: new Date().toISOString().split('T')[0] });
   };
 
-  const openApplyModal = (item) => {
-    setApplyModalItem(item);
-    setApplyDate(new Date().toISOString().split('T')[0]);
-  };
-
-  const confirmApply = () => {
-    if (applyModalItem && applyDate) {
-      onApply(applyModalItem, applyDate);
-      setApplyModalItem(null);
-    }
-  };
+  const openApplyModal = (item) => { setApplyModalItem(item); setApplyDate(new Date().toISOString().split('T')[0]); };
+  const confirmApply = () => { if (applyModalItem && applyDate) { onApply(applyModalItem, applyDate); setApplyModalItem(null); } };
 
   const pending = schedule.filter(s => s.status === 'scheduled');
   const history = schedule.filter(s => s.status === 'applied');
   const historySorted = [...history].sort((a,b) => b.appliedAt?.seconds - a.appliedAt?.seconds);
 
-  // Helper para mostrar resumo dos medicamentos
   const renderMedsSummary = (items, isLegacyMedId, isLegacyDose) => {
-    // Suporte legado
     if (isLegacyMedId) {
       const med = inventory.find(i => i.id === isLegacyMedId);
       return <div className="text-sm text-slate-500">{med ? med.name : '...'} • <span className="font-semibold text-teal-600">{isLegacyDose} {med?.unit}</span></div>;
     }
-    // Novo formato (lista)
     if (items && items.length > 0) {
       return (
         <div className="text-sm text-slate-500 mt-1 space-y-1">
@@ -716,61 +713,78 @@ function ScheduleTab({ inventory, schedule, onSchedule, onApply, onUndo, onDelet
 
   return (
     <div className="space-y-6">
+      {/* Formulário Novo Agendamento */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-teal-500 to-emerald-400"></div>
-        <h3 className="font-semibold mb-4 text-slate-700 flex items-center gap-2">
-          <Calendar size={18} className="text-teal-600" /> Agendar Protocolo
-        </h3>
+        <h3 className="font-semibold mb-4 text-slate-700 flex items-center gap-2"><Calendar size={18} className="text-teal-600" /> Agendar Protocolo</h3>
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
           <div className="md:col-span-12">
             <label className="block text-xs font-medium text-slate-500 mb-1">Nome do Paciente</label>
-            <input required type="text" placeholder="Nome completo" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-teal-500/20 outline-none"
-              value={newPatient.patientName} onChange={e => setNewPatient({...newPatient, patientName: e.target.value})} />
+            <input required type="text" placeholder="Nome completo" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-teal-500/20 outline-none" value={newPatient.patientName} onChange={e => setNewPatient({...newPatient, patientName: e.target.value})} />
           </div>
-
-          {/* Lista Dinâmica de Medicamentos */}
           <div className="md:col-span-12 bg-slate-50 p-4 rounded-lg border border-slate-100">
             <label className="block text-xs font-bold text-slate-600 mb-2 uppercase tracking-wide">Insumos do Protocolo</label>
             {newPatient.items.map((item, index) => (
               <div key={item.id} className="flex gap-2 mb-2 items-center">
-                <select required className="flex-grow p-2.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500/20 outline-none text-sm"
-                  value={item.medicationId} onChange={e => updateMedLine(item.id, 'medicationId', e.target.value)}>
+                <select required className="flex-grow p-2.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500/20 outline-none text-sm" value={item.medicationId} onChange={e => updateMedLine(item.id, 'medicationId', e.target.value)}>
                   <option value="">Selecione o insumo...</option>
-                  {inventory.map(invItem => (
-                    <option key={invItem.id} value={invItem.id}>{invItem.name} ({invItem.unit})</option>
-                  ))}
+                  {inventory.map(invItem => (<option key={invItem.id} value={invItem.id}>{invItem.name} ({invItem.unit})</option>))}
                 </select>
-                <input required type="number" step="0.1" placeholder="Dose" className="w-24 p-2.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500/20 outline-none text-sm"
-                  value={item.dose} onChange={e => updateMedLine(item.id, 'dose', e.target.value)} />
-                
-                {newPatient.items.length > 1 && (
-                  <button type="button" onClick={() => removeMedLine(item.id)} className="p-2 text-red-400 hover:bg-red-50 rounded"><Trash2 size={16} /></button>
-                )}
+                <input required type="number" step="0.1" placeholder="Dose" className="w-24 p-2.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500/20 outline-none text-sm" value={item.dose} onChange={e => updateMedLine(item.id, 'dose', e.target.value)} />
+                {newPatient.items.length > 1 && (<button type="button" onClick={() => removeMedLine(item.id)} className="p-2 text-red-400 hover:bg-red-50 rounded"><Trash2 size={16} /></button>)}
               </div>
             ))}
-            <button type="button" onClick={addMedLine} className="text-xs text-teal-600 font-medium hover:underline flex items-center gap-1 mt-2">
-              <Plus size={12} /> Adicionar outro insumo
-            </button>
+            <button type="button" onClick={addMedLine} className="text-xs text-teal-600 font-medium hover:underline flex items-center gap-1 mt-2"><Plus size={12} /> Adicionar outro insumo</button>
           </div>
-          
-          <div className="md:col-span-6">
-            <label className="block text-xs font-medium text-slate-500 mb-1">Data Início</label>
-            <input required type="date" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none"
-              value={newPatient.date} onChange={e => setNewPatient({...newPatient, date: e.target.value})} />
-          </div>
-           <div className="md:col-span-6">
-            <label className="block text-xs font-medium text-slate-500 mb-1">Repetições (Semanas)</label>
-            <input required type="number" min="1" max="50" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none text-center"
-              value={newPatient.sessions} onChange={e => setNewPatient({...newPatient, sessions: Number(e.target.value)})} />
-          </div>
-
-          <div className="md:col-span-12 mt-2">
-            <button type="submit" className="w-full bg-teal-600 text-white p-3 rounded-lg hover:bg-teal-700 font-medium shadow-sm transition-colors flex justify-center items-center gap-2">
-              <Plus size={16} /> Agendar Protocolo
-            </button>
-          </div>
+          <div className="md:col-span-6"><label className="block text-xs font-medium text-slate-500 mb-1">Data Início</label><input required type="date" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none" value={newPatient.date} onChange={e => setNewPatient({...newPatient, date: e.target.value})} /></div>
+          <div className="md:col-span-6"><label className="block text-xs font-medium text-slate-500 mb-1">Repetições (Semanas)</label><input required type="number" min="1" max="50" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none text-center" value={newPatient.sessions} onChange={e => setNewPatient({...newPatient, sessions: Number(e.target.value)})} /></div>
+          <div className="md:col-span-12 mt-2"><button type="submit" className="w-full bg-teal-600 text-white p-3 rounded-lg hover:bg-teal-700 font-medium shadow-sm transition-colors flex justify-center items-center gap-2"><Plus size={16} /> Agendar Protocolo</button></div>
         </form>
       </div>
+
+      {/* MODAL DE EDIÇÃO */}
+      {editingItem && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-start mb-4">
+              <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2"><Edit2 size={20} className="text-blue-600" /> Editar Agendamento</h3>
+              <button onClick={() => setEditingItem(null)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Paciente</label>
+                <input type="text" className="w-full p-2 border rounded-lg" value={editingItem.patientName} onChange={e => setEditingItem({...editingItem, patientName: e.target.value})} />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Data</label>
+                <input type="date" className="w-full p-2 border rounded-lg" value={editingItem.date} onChange={e => setEditingItem({...editingItem, date: e.target.value})} />
+              </div>
+
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                <label className="block text-xs font-bold text-slate-600 mb-2">Medicamentos</label>
+                {editingItem.items.map((item, idx) => (
+                  <div key={idx} className="flex gap-2 mb-2 items-center">
+                    <select className="flex-grow p-2 bg-white border rounded text-sm" value={item.medicationId} onChange={e => updateEditMedLine(idx, 'medicationId', e.target.value)}>
+                      <option value="">Selecione...</option>
+                      {inventory.map(invItem => (<option key={invItem.id} value={invItem.id}>{invItem.name} ({invItem.unit})</option>))}
+                    </select>
+                    <input type="number" step="0.1" className="w-20 p-2 bg-white border rounded text-sm" value={item.dose} onChange={e => updateEditMedLine(idx, 'dose', e.target.value)} />
+                    <button onClick={() => removeEditMedLine(idx)} className="p-1 text-red-400 hover:text-red-600"><Trash2 size={16} /></button>
+                  </div>
+                ))}
+                <button type="button" onClick={addEditMedLine} className="text-xs text-blue-600 font-medium hover:underline flex items-center gap-1 mt-2"><Plus size={12} /> Adicionar item</button>
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end mt-6">
+              <button onClick={() => setEditingItem(null)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
+              <button onClick={handleSaveEdit} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"><Save size={16} /> Salvar Alterações</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Confirmação Aplicação */}
       {applyModalItem && (
@@ -814,7 +828,8 @@ function ScheduleTab({ inventory, schedule, onSchedule, onApply, onUndo, onDelet
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => onDelete(item.id)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={18} /></button>
+                    <button onClick={() => handleStartEdit(item)} className="p-2 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors" title="Editar"><Edit2 size={18} /></button>
+                    <button onClick={() => onDelete(item.id)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Excluir"><Trash2 size={18} /></button>
                     <button onClick={() => openApplyModal(item)} className="bg-teal-50 text-teal-700 hover:bg-teal-600 hover:text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all shadow-sm">Aplicar <ArrowRight size={16} /></button>
                   </div>
                 </div>
