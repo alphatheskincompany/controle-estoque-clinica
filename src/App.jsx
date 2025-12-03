@@ -15,7 +15,7 @@ import {
   deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, increment, Timestamp 
 } from 'firebase/firestore';
 
-// --- SUAS CHAVES DO FIREBASE (JÁ CONFIGURADAS) ---
+// --- SUAS CHAVES DO FIREBASE ---
 const firebaseConfig = {
   apiKey: "AIzaSyA3we_zXf-NS_WKDE8rOLEVvpWAzsBfkQU",
   authDomain: "clinicaestoquethc.firebaseapp.com",
@@ -38,12 +38,14 @@ export default function ClinicStockApp() {
   const [schedule, setSchedule] = useState([]);
   const [stockLogs, setStockLogs] = useState([]); 
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState(null); // Novo estado para mostrar erros
 
   // --- AUTENTICAÇÃO ---
   useEffect(() => {
-    // Login Anônimo simples para começar
     signInAnonymously(auth).catch((error) => {
       console.error("Erro no login:", error);
+      setErrorMsg("Erro ao fazer login anônimo: " + error.message);
+      setLoading(false);
     });
 
     const unsubscribe = onAuthStateChanged(auth, setUser);
@@ -54,29 +56,41 @@ export default function ClinicStockApp() {
   useEffect(() => {
     if (!user) return;
 
-    // 1. Carregar Estoque (Pasta 'inventory')
+    // Função para tratar erros de conexão
+    const handleConnError = (err, source) => {
+      console.error(`Erro em ${source}:`, err);
+      // Traduz erros comuns
+      let msg = err.message;
+      if (msg.includes("insufficient-permissions")) msg = "Permissão negada. Verifique as Regras de Segurança no Firebase.";
+      if (msg.includes("project-not-found")) msg = "Projeto não encontrado. Verifique a configuração.";
+      
+      setErrorMsg(`Falha ao carregar ${source}: ${msg}`);
+      setLoading(false); // Para o carregamento para mostrar o erro
+    };
+
+    // 1. Carregar Estoque
     const inventoryRef = collection(db, 'inventory');
     const unsubInventory = onSnapshot(inventoryRef, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setInventory(items);
-    }, (error) => console.error("Erro ao ler estoque:", error));
+    }, (err) => handleConnError(err, "Estoque"));
 
-    // 2. Carregar Agenda (Pasta 'schedule')
+    // 2. Carregar Agenda
     const scheduleRef = collection(db, 'schedule');
     const unsubSchedule = onSnapshot(scheduleRef, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       const sorted = items.sort((a, b) => new Date(a.date) - new Date(b.date));
       setSchedule(sorted);
-      setLoading(false);
-    }, (error) => console.error("Erro ao ler agenda:", error));
+      setLoading(false); // Sucesso!
+    }, (err) => handleConnError(err, "Agenda"));
 
-    // 3. Carregar Logs (Pasta 'stock_logs')
+    // 3. Carregar Logs
     const logsRef = collection(db, 'stock_logs');
     const unsubLogs = onSnapshot(logsRef, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       const sortedLogs = items.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
       setStockLogs(sortedLogs);
-    });
+    }, (err) => console.error("Erro logs (não crítico)", err));
 
     return () => {
       unsubInventory();
@@ -217,7 +231,29 @@ export default function ClinicStockApp() {
 
   // --- RENDERIZAÇÃO ---
 
-  if (loading) return <div className="flex items-center justify-center h-screen text-slate-500">Carregando sistema...</div>;
+  if (loading) return (
+    <div className="flex flex-col items-center justify-center h-screen text-slate-500 gap-4">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600"></div>
+      <p>Conectando ao banco de dados...</p>
+    </div>
+  );
+
+  // TELA DE ERRO (Importante para diagnosticar)
+  if (errorMsg) return (
+    <div className="flex flex-col items-center justify-center h-screen bg-red-50 p-6 text-center">
+      <AlertTriangle className="h-16 w-16 text-red-500 mb-4" />
+      <h2 className="text-2xl font-bold text-red-800 mb-2">Erro de Conexão</h2>
+      <p className="text-red-600 max-w-md bg-white p-4 rounded shadow border border-red-100">
+        {errorMsg}
+      </p>
+      <p className="mt-6 text-slate-600 text-sm">
+        Verifique se você terminou de criar o Banco de Dados no Console do Firebase.
+      </p>
+      <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
+        Tentar Novamente
+      </button>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 md:pb-0">
