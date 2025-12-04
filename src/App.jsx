@@ -50,12 +50,12 @@ import {
 // =====================================================================================
 
 const firebaseConfig = {
-  apiKey: "SUA_API_KEY",
-  authDomain: "SUA_AUTH",
-  projectId: "SUA_PROJECT",
-  storageBucket: "SUA_BUCKET",
-  messagingSenderId: "SUA_SENDER",
-  appId: "SUA_APP_ID",
+  apiKey: "AIzaSyA3we_zXf-NS_WKDE8rOLEVvpWAzsBfkQU",
+  authDomain: "clinicaestoquethc.firebaseapp.com",
+  projectId: "clinicaestoquethc",
+  storageBucket: "clinicaestoquethc.firebasestorage.app",
+  messagingSenderId: "700610674954",
+  appId: "1:700610674954:web:8f22262a7350808a787af3"
 };
 
 // Inicializa Firebase
@@ -103,15 +103,45 @@ export default function ClinicStockApp() {
   // =====================================================================================
   // LISTENERS FIRESTORE (estoque, agenda, logs)
   // =====================================================================================
+  // AUTENTICAÇÃO ANÔNIMA + CONTROLE DE LOADING
   useEffect(() => {
+    signInAnonymously(auth)
+      .then(() => {
+        // ok, o onAuthStateChanged vai disparar
+      })
+      .catch((error) => {
+        console.error("Erro no login anônimo:", error);
+        setErrorMsg("Erro ao autenticar: " + error.message);
+        setLoading(false); // não deixa travar no carregando
+      });
+
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      // mesmo que venha null, não fica preso eternamente
+      if (!u) setLoading(false);
+    });
+
+    return () => unsub();
+  }, []);
+
+
+  // LISTENERS DO FIRESTORE
+  useEffect(() => {
+    // se não tem usuário, não tenta ouvir Firestore
     if (!user) return;
+
+    const handleError = (source, err) => {
+      console.error(`Erro em ${source}:`, err);
+      setErrorMsg(`Erro ao carregar ${source}: ${err.message}`);
+      setLoading(false);
+    };
 
     const unsubInventory = onSnapshot(
       collection(db, "inventory"),
       (snap) => {
         setInventory(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
       },
-      (err) => setErrorMsg(err.message)
+      (err) => handleError("estoque", err)
     );
 
     const unsubSchedule = onSnapshot(
@@ -122,9 +152,9 @@ export default function ClinicStockApp() {
           ...d.data(),
         }));
         setSchedule(items);
-        setLoading(false);
+        setLoading(false); // aqui garante que sai do carregando ao receber a 1ª resposta
       },
-      (err) => setErrorMsg(err.message)
+      (err) => handleError("agenda", err)
     );
 
     const unsubLogs = onSnapshot(
@@ -134,7 +164,8 @@ export default function ClinicStockApp() {
         setStockLogs(
           arr.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))
         );
-      }
+      },
+      (err) => handleError("logs de estoque", err)
     );
 
     return () => {
