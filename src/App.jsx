@@ -848,19 +848,15 @@ function InventoryTab({
             </div>
             <div>
               <label className="block text-slate-500 mb-1">Unidade</label>
-              <select
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                value={newItem.unit}
-                onChange={(e) =>
-                  setNewItem((old) => ({ ...old, unit: e.target.value }))
-                }
-              >
-                <option value="ml">ml</option>
-                <option value="mg">mg</option>
-                <option value="un">un</option>
-                <option value="amp">amp</option>
-                <option value="fr">fr</option>
-              </select>
+       <select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-teal-500/20 outline-none" value={newItem.unit} onChange={e => setNewItem({...newItem, unit: e.target.value})}>
+    <option value="ml">ml</option>
+    <option value="mg">mg</option>
+    <option value="un">un</option>
+    <option value="amp">amp</option>
+    <option value="fr">fr</option>
+    <option value="caixa">caixa</option>  {/* ⬅️ A NOVA OPÇÃO */}
+</select>
+
             </div>
             <div>
               <label className="block text-slate-500 mb-1">
