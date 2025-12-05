@@ -1,22 +1,22 @@
-// ============================
-// PARTE 1 - IMPORTS & SETUP
-// ============================
 import React, { useState, useEffect } from "react";
 import {
-  Activity,
-  Users,
-  Package,
-  BarChart3,
-  CheckCircle,
-  AlertTriangle,
-  Clock,
-  Plus,
   Trash2,
-  FileText,
-  Upload,
+  Plus,
+  Syringe,
+  Users,
+  BarChart3,
+  AlertTriangle,
+  CheckCircle,
+  Package,
+  Activity,
+  Calendar,
   Search,
-  History,
   X,
+  History,
+  Clock,
+  Upload,
+  CalendarClock,
+  Edit2,
 } from "lucide-react";
 
 import { initializeApp } from "firebase/app";
@@ -33,17 +33,14 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
-  query,
-  orderBy,
   serverTimestamp,
-  increment,
   Timestamp,
   writeBatch,
+  increment,
 } from "firebase/firestore";
 
-
 // ============================
-// CONFIG FIREBASE (SEU PROJETO)
+// CONFIG FIREBASE
 // ============================
 const firebaseConfig = {
   apiKey: "AIzaSyA3we_zXf-NS_WKDE8rOLEVvpWAzsBfkQU",
@@ -58,229 +55,130 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-
 // ============================
-// COMPONENTE PRINCIPAL
+// APP PRINCIPAL
 // ============================
-export default function App() {
+export default function ClinicStockApp() {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState(null);
-
-  const [activeTab, setActiveTab] = useState("agenda"); // agenda | estoque | compras | pacientes
+  const [activeTab, setActiveTab] = useState("agenda"); // agenda | estoque | pacientes | planejamento
   const [inventory, setInventory] = useState([]);
   const [schedule, setSchedule] = useState([]);
   const [stockLogs, setStockLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState(null);
 
-  // ----------------- AUTENTICAÇÃO -----------------
+  // ---------- AUTENTICAÇÃO ----------
   useEffect(() => {
-    signInAnonymously(auth)
-      .catch((error) => {
-        console.error("Erro no login anônimo:", error);
-        setErrorMsg("Erro ao autenticar: " + error.message);
-        setLoading(false);
-      });
-
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u || null);
-      if (!u) setLoading(false);
+    signInAnonymously(auth).catch((error) => {
+      console.error("Erro no login:", error);
+      setErrorMsg("Erro ao fazer login anônimo: " + error.message);
+      setLoading(false);
     });
 
+    const unsub = onAuthStateChanged(auth, (u) => setUser(u || null));
     return () => unsub();
   }, []);
 
-  // ----------------- LISTENERS FIRESTORE -----------------
+  // ---------- CARREGAR DADOS FIRESTORE ----------
   useEffect(() => {
     if (!user) return;
 
-    const handleError = (source, err) => {
-      console.error(`Erro em ${source}:`, err);
-      setErrorMsg(`Erro ao carregar ${source}: ${err.message}`);
+    const handleError = (err, label) => {
+      console.error("Erro em " + label, err);
+      let msg = err.message || String(err);
+      if (msg.includes("insufficient-permissions")) {
+        msg =
+          "Permissão negada. Verifique as Regras de Segurança do Firestore.";
+      }
+      setErrorMsg(`Falha ao carregar ${label}: ${msg}`);
       setLoading(false);
     };
 
     const invRef = collection(db, "inventory");
-    const schedRef = collection(db, "schedule");
-    const logsRef = collection(db, "stock_logs");
-
     const unsubInv = onSnapshot(
       invRef,
       (snap) => {
-        const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setInventory(arr);
+        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setInventory(items);
       },
-      (err) => handleError("estoque", err)
+      (err) => handleError(err, "estoque")
     );
 
-    const unsubSched = onSnapshot(
-      query(schedRef, orderBy("date")),
+    const schRef = collection(db, "schedule");
+    const unsubSch = onSnapshot(
+      schRef,
       (snap) => {
-        const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setSchedule(arr);
+        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setSchedule(items);
         setLoading(false);
       },
-      (err) => handleError("agenda", err)
+      (err) => handleError(err, "agenda")
     );
 
+    const logsRef = collection(db, "stock_logs");
     const unsubLogs = onSnapshot(
       logsRef,
       (snap) => {
-        const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setStockLogs(
-          arr.sort(
-            (a, b) =>
-              (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
-          )
+        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        items.sort(
+          (a, b) =>
+            (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
         );
+        setStockLogs(items);
       },
-      (err) => handleError("logs", err)
+      (err) => console.error("Erro logs", err)
     );
 
     return () => {
       unsubInv();
-      unsubSched();
+      unsubSch();
       unsubLogs();
     };
   }, [user]);
 
-  // ============================
-  // HANDLERS - ESTOQUE
-  // ============================
+  // ---------- HANDLERS DE ESTOQUE ----------
   const handleAddInventory = async (item) => {
-    if (!user) return;
     try {
       await addDoc(collection(db, "inventory"), {
         ...item,
         createdAt: serverTimestamp(),
       });
-    } catch (e) {
-      console.error("Erro ao adicionar insumo:", e);
-      alert("Erro ao salvar insumo.");
+    } catch (err) {
+      alert("Erro ao cadastrar insumo: " + err.message);
     }
   };
 
-  const handleImportCSVInventory = async (csvText) => {
-    if (!user) return;
+  const handleEditInventory = async (item) => {
     try {
-      const lines = csvText
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter(Boolean);
-
-      if (lines.length === 0) {
-        alert("Arquivo vazio.");
-        return;
-      }
-
-      const batch = writeBatch(db);
-      let count = 0;
-
-      lines.forEach((line) => {
-        const cols = line.split(",").map((c) => c.trim());
-        if (cols.length < 3) return;
-
-        const [name, unit, qtyStr, minStr] = cols;
-        const quantity = Number(qtyStr) || 0;
-        const minStock = Number(minStr) || 5;
-
-        const ref = doc(collection(db, "inventory"));
-        batch.set(ref, {
-          name,
-          unit: unit || "un",
-          quantity,
-          minStock,
-          createdAt: serverTimestamp(),
-        });
-        count++;
+      const ref = doc(db, "inventory", item.id);
+      await updateDoc(ref, {
+        name: item.name,
+        unit: item.unit,
+        quantity: Number(item.quantity) || 0,
+        minStock: Number(item.minStock) || 0,
+        updatedAt: serverTimestamp(),
       });
-
-      if (count > 0) {
-        await batch.commit();
-        alert(`${count} insumos importados com sucesso!`);
-      } else {
-        alert("Nenhum insumo válido encontrado no arquivo.");
-      }
-    } catch (e) {
-      console.error("Erro na importação", e);
-      alert("Erro ao importar insumos. Verifique o arquivo.");
+    } catch (err) {
+      alert("Erro ao atualizar insumo: " + err.message);
     }
   };
 
-  const handleImportCSVAgenda = async (csvText) => {
-    if (!user) return;
+  const handleDeleteInventory = async (id) => {
     try {
-      const lines = csvText
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter(Boolean);
-
-      if (lines.length === 0) {
-        alert("Arquivo de agenda vazio.");
-        return;
-      }
-
-      const batch = writeBatch(db);
-      let created = 0;
-      const notFound = new Set();
-
-      lines.forEach((line) => {
-        const cols = line.split(",").map((c) => c.trim());
-        if (cols.length < 4) return;
-
-        const [patientName, itemName, doseStr, dateStr] = cols;
-        const invItem = inventory.find(
-          (i) => i.name.toLowerCase() === itemName.toLowerCase()
-        );
-        if (!invItem) {
-          notFound.add(itemName);
-          return;
-        }
-
-        const dose = Number(doseStr);
-        if (!dose || !dateStr) return;
-
-        const d = new Date(dateStr + "T00:00:00");
-        if (isNaN(d.getTime())) return;
-
-        const ts = Timestamp.fromDate(d);
-        const ref = doc(collection(db, "schedule"));
-        batch.set(ref, {
-          patientName,
-          items: [{ medicationId: invItem.id, dose }],
-          date: ts,
-          status: "scheduled",
-          sessions: 1,
-          sessionIndex: 1,
-          createdAt: serverTimestamp(),
-        });
-        created++;
-      });
-
-      if (created > 0) {
-        await batch.commit();
-      }
-
-      let msg = `${created} agendamentos importados.`;
-      if (notFound.size > 0) {
-        msg +=
-          "\nInsumos não encontrados no estoque: " +
-          Array.from(notFound).join(", ");
-      }
-      alert(msg);
-    } catch (e) {
-      console.error("Erro ao importar agenda", e);
-      alert("Erro ao importar agenda. Verifique o arquivo.");
+      await deleteDoc(doc(db, "inventory", id));
+    } catch (err) {
+      alert("Erro ao excluir insumo: " + err.message);
     }
   };
 
   const handleUpdateStock = async (id, quantityToAdd, itemName) => {
-    if (!user) return;
     try {
-      const qty = Number(quantityToAdd);
-      const ref = doc(db, "inventory", id);
+      const qty = Number(quantityToAdd) || 0;
+      const itemRef = doc(db, "inventory", id);
 
-      await updateDoc(ref, {
+      await updateDoc(itemRef, {
         quantity: increment(qty),
+        updatedAt: serverTimestamp(),
       });
 
       await addDoc(collection(db, "stock_logs"), {
@@ -290,190 +188,318 @@ export default function App() {
         type: "entry",
         createdAt: serverTimestamp(),
       });
-    } catch (e) {
-      console.error("Erro ao atualizar estoque", e);
-      alert("Erro ao atualizar estoque.");
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao registrar entrada de estoque: " + err.message);
     }
   };
 
-  const handleDeleteInventory = async (id) => {
-    if (!user) return;
-    if (!window.confirm("Deseja realmente excluir este insumo?")) return;
+  // Importar insumos (Nome, Unidade, Quantidade, Minimo)
+  const handleImportInventoryCSV = async (csvText) => {
     try {
-      await deleteDoc(doc(db, "inventory", id));
-    } catch (e) {
-      console.error("Erro ao excluir insumo", e);
-      alert("Erro ao excluir.");
+      const lines = csvText
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+
+      if (lines.length === 0) {
+        alert("Arquivo vazio.");
+        return;
+      }
+
+      const batch = writeBatch(db);
+      let count = 0;
+
+      for (const line of lines) {
+        const cols = line.split(",").map((c) => c.trim());
+        if (cols.length < 3) continue;
+
+        const [name, unit, quantity, minStock] = cols;
+        if (!name) continue;
+
+        const ref = doc(collection(db, "inventory"));
+        batch.set(ref, {
+          name,
+          unit: unit || "un",
+          quantity: Number(quantity) || 0,
+          minStock: Number(minStock) || 0,
+          createdAt: serverTimestamp(),
+        });
+        count++;
+      }
+
+      await batch.commit();
+      alert(`${count} insumo(s) importado(s) com sucesso.`);
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao importar insumos: " + err.message);
     }
   };
 
-  // ============================
-  // HANDLERS - AGENDA / PACIENTES
-  // ============================
-  const handleSchedulePatient = async (data) => {
-    if (!user) return;
+  // Importar agenda de aplicações (patientName,medicationName,dose,date)
+  const handleImportAgendaCSV = async (csvText) => {
+    try {
+      const lines = csvText
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+
+      if (lines.length <= 1 && lines[0]?.toLowerCase().includes("patient")) {
+        alert("Nenhum registro de agenda encontrado.");
+        return;
+      }
+
+      // Se primeira linha for cabeçalho, ignora
+      let startIndex = 0;
+      if (lines[0].toLowerCase().includes("patient")) {
+        startIndex = 1;
+      }
+
+      const batch = writeBatch(db);
+      let count = 0;
+
+      for (let i = startIndex; i < lines.length; i++) {
+        const line = lines[i];
+        const cols = line.split(",").map((c) => c.trim());
+        if (cols.length < 4) continue;
+
+        const [patientName, medicationName, doseStr, dateStr] = cols;
+        if (!patientName || !medicationName || !doseStr || !dateStr) continue;
+
+        const dose = Number(doseStr.toString().replace(",", ".")) || 0;
+        if (!dose) continue;
+
+        // tenta achar insumo pelo nome
+        const inv = inventory.find(
+          (i) => i.name.toLowerCase().trim() === medicationName.toLowerCase().trim()
+        );
+
+        let parsedDate = new Date(dateStr + "T00:00:00");
+        if (isNaN(parsedDate.getTime())) {
+          continue;
+        }
+
+        const tsDate = Timestamp.fromDate(parsedDate);
+
+        const ref = doc(collection(db, "schedule"));
+        batch.set(ref, {
+          patientName,
+          items: [
+            {
+              medicationId: inv ? inv.id : null,
+              medicationName,
+              dose,
+            },
+          ],
+          date: tsDate,
+          status: "scheduled",
+          createdAt: serverTimestamp(),
+        });
+
+        count++;
+      }
+
+      await batch.commit();
+      alert(`${count} agendamento(s) importado(s) com sucesso.`);
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao importar agenda: " + err.message);
+    }
+  };
+
+  // ---------- HANDLERS AGENDA / APLICAÇÃO ----------
+  const handleSchedule = async (data) => {
     try {
       await addDoc(collection(db, "schedule"), {
         ...data,
-        status: "scheduled",
+        status: data.status || "scheduled",
         createdAt: serverTimestamp(),
       });
-    } catch (e) {
-      console.error("Erro ao agendar", e);
-      alert("Erro ao agendar protocolo.");
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao agendar protocolo: " + err.message);
     }
   };
 
-  const handleApply = async (appointment, actualDate) => {
-    if (!user) return;
+  const handleDeleteSchedule = async (id) => {
     try {
-      const itemsToProcess = appointment.items || [];
-      if (itemsToProcess.length === 0) return;
+      await deleteDoc(doc(db, "schedule", id));
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao excluir agendamento: " + err.message);
+    }
+  };
+
+  const handleApply = async (appointment, actualDateString) => {
+    try {
+      const itemsToUse =
+        appointment.items && appointment.items.length > 0
+          ? appointment.items
+          : [];
+
+      if (itemsToUse.length === 0) {
+        alert("Nenhum insumo vinculado à aplicação.");
+        return;
+      }
 
       // valida estoque
-      for (const it of itemsToProcess) {
-        const stockItem = inventory.find((i) => i.id === it.medicationId);
-        if (!stockItem) {
-          alert("Insumo não encontrado no estoque.");
+      for (const it of itemsToUse) {
+        if (!it.medicationId) {
+          alert(
+            `Insumo "${it.medicationName || "sem nome"}" não está vinculado ao estoque.`
+          );
           return;
         }
-        if (stockItem.quantity < Number(it.dose)) {
+        const stockItem = inventory.find((i) => i.id === it.medicationId);
+        if (!stockItem) {
           alert(
-            `Estoque insuficiente de ${stockItem.name}. Atual: ${stockItem.quantity}, necessário: ${it.dose}`
+            `Insumo "${it.medicationName || "sem nome"}" não encontrado no estoque.`
+          );
+          return;
+        }
+        const dose = Number(it.dose) || 0;
+        if (stockItem.quantity < dose) {
+          alert(
+            `Estoque insuficiente de ${stockItem.name}. Tem ${stockItem.quantity}, precisa de ${dose}.`
           );
           return;
         }
       }
 
-      const d = new Date(actualDate + "T00:00:00");
-      const ts = Timestamp.fromDate(d);
+      const baseDate = new Date(actualDateString + "T00:00:00");
+      const tsApplied = Timestamp.fromDate(baseDate);
 
       const batch = writeBatch(db);
 
-      itemsToProcess.forEach((it) => {
+      // dá baixa no estoque
+      for (const it of itemsToUse) {
+        const dose = Number(it.dose) || 0;
         const itemRef = doc(db, "inventory", it.medicationId);
         batch.update(itemRef, {
-          quantity: increment(-Number(it.dose)),
+          quantity: increment(-dose),
+          updatedAt: serverTimestamp(),
         });
 
-        const logRef = doc(collection(db, "stock_logs"));
         const stockItem = inventory.find((i) => i.id === it.medicationId);
+        const logRef = doc(collection(db, "stock_logs"));
         batch.set(logRef, {
           itemId: it.medicationId,
-          itemName: stockItem?.name || "Aplicação",
-          quantity: Number(it.dose),
+          itemName: stockItem?.name || it.medicationName || "Insumo",
+          quantity: dose,
           type: "usage",
           createdAt: serverTimestamp(),
         });
-      });
+      }
 
-      const schedRef = doc(db, "schedule", appointment.id);
-      batch.update(schedRef, {
+      const schRef = doc(db, "schedule", appointment.id);
+      batch.update(schRef, {
         status: "applied",
-        appliedAt: ts,
+        appliedAt: tsApplied,
       });
 
       await batch.commit();
-    } catch (e) {
-      console.error("Erro ao aplicar", e);
-      alert("Erro ao registrar aplicação.");
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao registrar aplicação: " + err.message);
     }
   };
 
-  const handleUndoApply = async (appointment) => {
-    if (!user) return;
-    if (
-      !window.confirm(
-        `Deseja desfazer a aplicação para ${appointment.patientName}?`
-      )
-    )
-      return;
-
+  const handleUndo = async (appointment) => {
     try {
-      const itemsToProcess = appointment.items || [];
+      const itemsToUse =
+        appointment.items && appointment.items.length > 0
+          ? appointment.items
+          : [];
+
+      if (itemsToUse.length === 0) {
+        alert("Nenhum insumo vinculado à aplicação.");
+        return;
+      }
+
       const batch = writeBatch(db);
 
-      itemsToProcess.forEach((it) => {
+      for (const it of itemsToUse) {
+        if (!it.medicationId) continue;
+        const dose = Number(it.dose) || 0;
+
         const itemRef = doc(db, "inventory", it.medicationId);
         batch.update(itemRef, {
-          quantity: increment(Number(it.dose)),
+          quantity: increment(dose),
+          updatedAt: serverTimestamp(),
         });
 
-        const logRef = doc(collection(db, "stock_logs"));
         const stockItem = inventory.find((i) => i.id === it.medicationId);
+        const logRef = doc(collection(db, "stock_logs"));
         batch.set(logRef, {
           itemId: it.medicationId,
-          itemName: stockItem?.name || "Estorno",
-          quantity: Number(it.dose),
+          itemName: stockItem?.name || it.medicationName || "Insumo",
+          quantity: dose,
           type: "reversal",
           createdAt: serverTimestamp(),
         });
-      });
+      }
 
-      const schedRef = doc(db, "schedule", appointment.id);
-      batch.update(schedRef, {
+      const schRef = doc(db, "schedule", appointment.id);
+      batch.update(schRef, {
         status: "scheduled",
         appliedAt: null,
       });
 
       await batch.commit();
-    } catch (e) {
-      console.error("Erro ao desfazer", e);
-      alert("Erro ao desfazer aplicação.");
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao desfazer aplicação: " + err.message);
     }
   };
 
-  const handleDeleteSchedule = async (id) => {
-    if (!user) return;
-    if (!window.confirm("Excluir este agendamento?")) return;
-    try {
-      await deleteDoc(doc(db, "schedule", id));
-    } catch (e) {
-      console.error("Erro ao excluir agendamento", e);
-      alert("Erro ao excluir agendamento.");
+  // ---------- MÉTRICAS HEADER ----------
+  const queueCount = schedule.filter((s) => s.status === "scheduled").length;
+
+  const todayAppliedCount = schedule.filter((s) => {
+    if (s.status !== "applied" || !s.appliedAt) return false;
+    let d;
+    if (s.appliedAt instanceof Timestamp) {
+      d = s.appliedAt.toDate();
+    } else if (s.appliedAt?.seconds != null) {
+      d = new Date(s.appliedAt.seconds * 1000);
+    } else {
+      d = new Date(s.appliedAt);
     }
-  };
+    if (isNaN(d?.getTime?.())) return false;
+    const today = new Date();
+    return (
+      d.getFullYear() === today.getFullYear() &&
+      d.getMonth() === today.getMonth() &&
+      d.getDate() === today.getDate()
+    );
+  }).length;
 
-  // ============================
-  // MÉTRICAS DO HEADER
-  // ============================
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const pendingCount = schedule.filter((s) => s.status === "scheduled").length;
-  const appliedToday = schedule.filter(
-    (s) =>
-      s.status === "applied" &&
-      s.appliedAt?.seconds * 1000 >= today.getTime()
-  ).length;
-  const criticalStock = inventory.filter(
-    (i) => i.quantity <= (i.minStock || 0)
+  const criticalCount = inventory.filter(
+    (i) => Number(i.quantity) <= Number(i.minStock || 0)
   ).length;
 
-  // ============================
-  // TELAS DE LOADING / ERRO
-  // ============================
+  // ---------- TELAS DE LOADING / ERRO ----------
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen text-slate-600">
-        <div className="animate-spin w-10 h-10 border-4 border-teal-600 border-t-transparent rounded-full"></div>
-        <p className="mt-3 text-sm">Carregando sistema...</p>
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-slate-500">
+        <div className="h-8 w-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm">Carregando sistema da clínica...</p>
       </div>
     );
   }
 
   if (errorMsg) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen text-center px-6 bg-red-50">
-        <AlertTriangle size={40} className="mb-4 text-red-500" />
-        <h2 className="font-bold text-xl text-red-700 mb-2">
-          Erro ao carregar dados
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-red-50">
+        <AlertTriangle className="w-10 h-10 text-red-500 mb-2" />
+        <h2 className="text-lg font-semibold text-red-700 mb-1">
+          Falha ao conectar
         </h2>
-        <p className="text-sm text-red-700 bg-white border border-red-200 rounded-lg p-3">
+        <p className="text-sm text-red-600 max-w-md text-center bg-white border border-red-100 rounded-lg px-4 py-3">
           {errorMsg}
         </p>
         <button
-          className="mt-4 px-4 py-2 rounded-lg bg-red-600 text-white"
+          className="mt-4 px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700"
           onClick={() => window.location.reload()}
         >
           Tentar novamente
@@ -482,306 +508,350 @@ export default function App() {
     );
   }
 
-  // ============================
-  // LAYOUT PRINCIPAL
-  // ============================
+  // ---------- RENDER PRINCIPAL ----------
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 pb-20 md:pb-0">
       {/* HEADER */}
-      <header className="bg-white shadow-sm border-b border-slate-200 p-4 sticky top-0 z-40">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <div className="bg-teal-600 p-2 rounded-lg shadow">
-              <Activity className="text-white w-5 h-5" />
+            <div className="bg-teal-600 rounded-lg p-2">
+              <Activity className="text-white" size={18} />
             </div>
-            <h1 className="text-xl font-bold tracking-tight">
-              Clinic<span className="text-teal-600">Control</span>
-            </h1>
+            <div>
+              <h1 className="text-sm md:text-base font-bold text-slate-800 leading-tight">
+                Clinic<span className="text-teal-600">Control</span>
+              </h1>
+              <p className="text-[11px] text-slate-400">
+                Enfermagem · Estoque · Planejamento
+              </p>
+            </div>
           </div>
 
           <nav className="hidden md:flex gap-2">
             <NavButton
               label="Enfermaria"
-              icon={<Users size={18} />}
+              icon={<Users size={15} />}
               active={activeTab === "agenda"}
               onClick={() => setActiveTab("agenda")}
             />
             <NavButton
               label="Estoque"
-              icon={<Package size={18} />}
+              icon={<Package size={15} />}
               active={activeTab === "estoque"}
               onClick={() => setActiveTab("estoque")}
             />
             <NavButton
-              label="Planejamento"
-              icon={<BarChart3 size={18} />}
-              active={activeTab === "compras"}
-              onClick={() => setActiveTab("compras")}
-            />
-            <NavButton
               label="Pacientes"
-              icon={<FileText size={18} />}
+              icon={<Syringe size={15} />}
               active={activeTab === "pacientes"}
               onClick={() => setActiveTab("pacientes")}
             />
+            <NavButton
+              label="Planejamento"
+              icon={<BarChart3 size={15} />}
+              active={activeTab === "planejamento"}
+              onClick={() => setActiveTab("planejamento")}
+            />
           </nav>
+        </div>
+
+        {/* MÉTRICAS HEADER */}
+        <div className="bg-slate-50 border-t border-slate-100">
+          <div className="max-w-6xl mx-auto px-4 py-2 grid grid-cols-3 gap-2 text-[11px]">
+            <MetricPill
+              icon={<Users size={13} />}
+              label="Fila de aplicação"
+              value={queueCount}
+            />
+            <MetricPill
+              icon={<CheckCircle size={13} />}
+              label="Aplicados hoje"
+              value={todayAppliedCount}
+            />
+            <MetricPill
+              icon={<AlertTriangle size={13} />}
+              label="Insumos críticos"
+              value={criticalCount}
+              danger={criticalCount > 0}
+            />
+          </div>
         </div>
       </header>
 
-      {/* MÉTRICAS */}
-      <section className="max-w-6xl mx-auto px-4 mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Fila */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex items-center gap-4">
-          <div className="bg-amber-100 text-amber-700 p-3 rounded-full">
-            <Clock size={26} />
-          </div>
-          <div>
-            <p className="text-xs uppercase font-semibold text-amber-700">
-              Fila de Aplicação
-            </p>
-            <h2 className="text-3xl font-black text-amber-800">
-              {pendingCount}
-            </h2>
-          </div>
-        </div>
-
-        {/* Aplicados hoje */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex items-center gap-4">
-          <div className="bg-teal-100 text-teal-700 p-3 rounded-full">
-            <CheckCircle size={26} />
-          </div>
-          <div>
-            <p className="text-xs uppercase font-semibold text-teal-700">
-              Aplicados Hoje
-            </p>
-            <h2 className="text-3xl font-black text-teal-800">
-              {appliedToday}
-            </h2>
-          </div>
-        </div>
-
-        {/* Insumos críticos */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex items-center gap-4">
-          <div className="bg-red-100 text-red-700 p-3 rounded-full">
-            <AlertTriangle size={26} />
-          </div>
-          <div>
-            <p className="text-xs uppercase font-semibold text-red-700">
-              Insumos Críticos
-            </p>
-            <h2 className="text-3xl font-black text-red-800">
-              {criticalStock}
-            </h2>
-          </div>
-        </div>
-      </section>
-
-      {/* CONTEÚDO PRINCIPAL */}
-      <main className="max-w-6xl mx-auto p-4 md:p-6 mt-4">
-        {activeTab === "agenda" && (
-          <ScheduleTab
-            inventory={inventory}
-            schedule={schedule}
-            onSchedule={handleSchedulePatient}
-            onApply={handleApply}
-            onUndo={handleUndoApply}
-            onDelete={handleDeleteSchedule}
-          />
-        )}
-
+      {/* CONTEÚDO */}
+      <main className="max-w-6xl mx-auto px-4 py-4 md:py-6 space-y-4">
         {activeTab === "estoque" && (
           <InventoryTab
             inventory={inventory}
             stockLogs={stockLogs}
             onAdd={handleAddInventory}
-            onImport={handleImportCSVInventory}
-            onImportAgenda={handleImportCSVAgenda}
+            onEditItem={handleEditInventory}
+            onImport={handleImportInventoryCSV}
+            onImportAgenda={handleImportAgendaCSV}
             onUpdateStock={handleUpdateStock}
             onDelete={handleDeleteInventory}
           />
         )}
 
-        {activeTab === "compras" && (
-          <DashboardTab inventory={inventory} schedule={schedule} />
+        {activeTab === "agenda" && (
+          <ScheduleTab
+            inventory={inventory}
+            schedule={schedule}
+            onSchedule={handleSchedule}
+            onApply={handleApply}
+            onUndo={handleUndo}
+            onDelete={handleDeleteSchedule}
+          />
         )}
 
         {activeTab === "pacientes" && (
           <PatientsTab
             schedule={schedule}
             inventory={inventory}
-            onSchedule={handleSchedulePatient}
+            onSchedule={handleSchedule}
             onApply={handleApply}
-            onUndo={handleUndoApply}
+            onUndo={handleUndo}
           />
+        )}
+
+        {activeTab === "planejamento" && (
+          <DashboardTab inventory={inventory} schedule={schedule} />
         )}
       </main>
 
       {/* NAV MOBILE */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-2 flex justify-around shadow-lg z-50">
-        <MobileNav
-          label="Agenda"
-          icon={<Users size={20} />}
-          active={activeTab === "agenda"}
-          onClick={() => setActiveTab("agenda")}
-        />
-        <MobileNav
-          label="Estoque"
-          icon={<Package size={20} />}
-          active={activeTab === "estoque"}
-          onClick={() => setActiveTab("estoque")}
-        />
-        <MobileNav
-          label="Planejamento"
-          icon={<BarChart3 size={20} />}
-          active={activeTab === "compras"}
-          onClick={() => setActiveTab("compras")}
-        />
-        <MobileNav
-          label="Pacientes"
-          icon={<FileText size={20} />}
-          active={activeTab === "pacientes"}
-          onClick={() => setActiveTab("pacientes")}
-        />
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-lg z-30">
+        <div className="flex">
+          <MobileNavButton
+            label="Enfermaria"
+            icon={<Users size={18} />}
+            active={activeTab === "agenda"}
+            onClick={() => setActiveTab("agenda")}
+          />
+          <MobileNavButton
+            label="Estoque"
+            icon={<Package size={18} />}
+            active={activeTab === "estoque"}
+            onClick={() => setActiveTab("estoque")}
+          />
+          <MobileNavButton
+            label="Pacientes"
+            icon={<Syringe size={18} />}
+            active={activeTab === "pacientes"}
+            onClick={() => setActiveTab("pacientes")}
+          />
+          <MobileNavButton
+            label="Planejamento"
+            icon={<BarChart3 size={18} />}
+            active={activeTab === "planejamento"}
+            onClick={() => setActiveTab("planejamento")}
+          />
+        </div>
       </div>
     </div>
   );
 }
 
-
 // ============================
-// BOTÕES DE NAVEGAÇÃO
+// COMPONENTES DE NAV
 // ============================
 function NavButton({ label, icon, active, onClick }) {
   return (
     <button
-      className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-all ${
-        active
-          ? "bg-teal-50 text-teal-700 border border-teal-200"
-          : "text-slate-500 hover:bg-slate-100"
-      }`}
       onClick={onClick}
+      className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
+        active
+          ? "bg-teal-50 text-teal-700 border border-teal-100"
+          : "bg-white text-slate-500 border border-transparent hover:bg-slate-50"
+      }`}
     >
       {icon}
-      {label}
+      <span>{label}</span>
     </button>
   );
 }
 
-function MobileNav({ label, icon, active, onClick }) {
+function MobileNavButton({ label, icon, active, onClick }) {
   return (
     <button
-      className={`flex flex-col items-center text-xs p-2 rounded-lg ${
-        active ? "text-teal-600" : "text-slate-400"
-      }`}
       onClick={onClick}
+      className={`flex-1 flex flex-col items-center justify-center py-2 text-[10px] ${
+        active ? "text-teal-600 bg-teal-50" : "text-slate-400"
+      }`}
     >
       {icon}
-      <span className="mt-1">{label}</span>
+      <span className="mt-0.5 font-medium">{label}</span>
     </button>
   );
 }
-// ============================
-// PARTE 2 - ABA ESTOQUE
-// ============================
 
+function MetricPill({ icon, label, value, danger }) {
+  return (
+    <div
+      className={`flex items-center gap-1.5 px-2 py-1 rounded-full border text-[11px] ${
+        danger
+          ? "border-red-100 bg-red-50 text-red-700"
+          : "border-slate-200 bg-white text-slate-600"
+      }`}
+    >
+      {icon}
+      <span className="font-semibold">{value}</span>
+      <span className="text-[10px]">{label}</span>
+    </div>
+  );
+}
+
+// ============================
+// A PARTIR DAQUI VÃO AS OUTRAS PARTES:
+// - PARTE 2: InventoryTab
+// - PARTE 3: helper de data + ScheduleTab
+// - PARTE 4: PatientsTab + DashboardTab
+// ============================
+// ============================
+// PARTE 2 - ABA ESTOQUE / INVENTORYTAB
+// ============================
 function InventoryTab({
   inventory,
   stockLogs,
   onAdd,
+  onEditItem,
   onImport,
   onImportAgenda,
   onUpdateStock,
   onDelete,
 }) {
-  const [showAdd, setShowAdd] = useState(false);
-  const [showImportStock, setShowImportStock] = useState(false);
-  const [showImportAgenda, setShowImportAgenda] = useState(false);
-
-  const [searchTerm, setSearchTerm] = useState("");
   const [newItem, setNewItem] = useState({
     name: "",
     unit: "ml",
     quantity: "",
     minStock: "",
   });
+  const [isAdding, setIsAdding] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
 
-  const [selectedForEntry, setSelectedForEntry] = useState(null);
-  const [entryQty, setEntryQty] = useState("");
-  const [selectedForDelete, setSelectedForDelete] = useState(null);
-  const [selectedForHistory, setSelectedForHistory] = useState(null);
+  const [isImportInventoryOpen, setIsImportInventoryOpen] = useState(false);
+  const [isImportAgendaOpen, setIsImportAgendaOpen] = useState(false);
 
-  const filteredInventory = inventory.filter((i) =>
-    i.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const [stockEntryItem, setStockEntryItem] = useState(null);
+  const [stockEntryValue, setStockEntryValue] = useState("");
 
+  const [deleteItem, setDeleteItem] = useState(null);
+  const [historyItem, setHistoryItem] = useState(null);
+
+  const [editItem, setEditItem] = useState(null);
+
+  // -------- CADASTRAR NOVO INSUMO --------
   const handleSubmitNewItem = (e) => {
     e.preventDefault();
-    if (!newItem.name.trim()) return;
-
+    if (!newItem.name.trim()) {
+      alert("Informe o nome do insumo.");
+      return;
+    }
     onAdd({
       name: newItem.name.trim(),
       unit: newItem.unit,
       quantity: Number(newItem.quantity) || 0,
       minStock: Number(newItem.minStock) || 0,
     });
-
     setNewItem({ name: "", unit: "ml", quantity: "", minStock: "" });
-    setShowAdd(false);
+    setIsAdding(false);
   };
 
-  const handleStockFileChange = (e) => {
-    const file = e.target.files[0];
+  // -------- IMPORTAR INSUMOS CSV --------
+  const handleFileImportInventory = (e) => {
+    const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      onImport(ev.target.result);
-      setShowImportStock(false);
+      const text = ev.target?.result;
+      if (typeof text === "string") {
+        onImport(text);
+        setIsImportInventoryOpen(false);
+      }
     };
     reader.readAsText(file);
   };
 
-  const handleAgendaFileChange = (e) => {
-    const file = e.target.files[0];
+  // -------- IMPORTAR AGENDA CSV --------
+  const handleFileImportAgenda = (e) => {
+    const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      onImportAgenda(ev.target.result);
-      setShowImportAgenda(false);
+      const text = ev.target?.result;
+      if (typeof text === "string") {
+        onImportAgenda(text);
+        setIsImportAgendaOpen(false);
+      }
     };
     reader.readAsText(file);
   };
 
-  const confirmEntry = () => {
-    if (!selectedForEntry) return;
-    const qty = Number(entryQty);
-    if (!qty) return;
-    onUpdateStock(selectedForEntry.id, qty, selectedForEntry.name);
-    setSelectedForEntry(null);
-    setEntryQty("");
+  // -------- ENTRADA DE ESTOQUE --------
+  const handleConfirmEntry = () => {
+    if (!stockEntryItem) return;
+    if (!stockEntryValue) return;
+
+    const qtd = Number(
+      stockEntryValue.toString().replace(",", ".").trim()
+    );
+    if (isNaN(qtd) || qtd === 0) {
+      alert("Informe uma quantidade válida.");
+      return;
+    }
+
+    onUpdateStock(stockEntryItem.id, qtd, stockEntryItem.name);
+    setStockEntryItem(null);
+    setStockEntryValue("");
   };
 
-  const confirmDelete = () => {
-    if (!selectedForDelete) return;
-    onDelete(selectedForDelete.id);
-    setSelectedForDelete(null);
+  // -------- EXCLUIR INSUMO --------
+  const handleConfirmDelete = () => {
+    if (!deleteItem) return;
+    onDelete(deleteItem.id);
+    setDeleteItem(null);
   };
 
-  const logsForSelected =
-    selectedForHistory == null
-      ? []
-      : stockLogs.filter((l) => l.itemId === selectedForHistory.id);
+  // -------- SALVAR EDIÇÃO INSUMO --------
+  const handleSaveEditItem = () => {
+    if (!editItem) return;
+    if (!editItem.name?.trim()) {
+      alert("Informe o nome do insumo.");
+      return;
+    }
+    onEditItem({
+      ...editItem,
+      name: editItem.name.trim(),
+      quantity: Number(editItem.quantity) || 0,
+      minStock: Number(editItem.minStock) || 0,
+    });
+    setEditItem(null);
+  };
+
+  // -------- LISTAGENS --------
+  const filteredInventory = inventory
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .filter((item) =>
+      item.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+  const logsForHistory = historyItem
+    ? stockLogs.filter((l) => l.itemId === historyItem.id)
+    : [];
 
   return (
     <div className="space-y-6">
-      {/* CABEÇALHO DA ABA */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      {/* TOPO / AÇÕES */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
         <div>
-          <h2 className="text-lg font-bold text-slate-700 flex items-center gap-2">
-            <Package className="text-teal-600" size={18} />
-            Estoque de Insumos
+          <h2 className="text-base md:text-lg font-semibold text-slate-800 flex items-center gap-2">
+            <Package size={18} className="text-teal-600" />
+            Estoque de insumos
           </h2>
-          <p className="text-xs text-slate-500">
-            Cadastre, importe, acompanhe níveis e movimentos do estoque.
+          <p className="text-[11px] text-slate-500">
+            Controle de insumos, mínimos e entrada de estoque.
           </p>
         </div>
 
@@ -789,115 +859,150 @@ function InventoryTab({
           <div className="relative flex-1 min-w-[180px]">
             <Search
               size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
             />
             <input
               type="text"
               placeholder="Buscar insumo..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              className="w-full pl-7 pr-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/20 bg-white"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
 
           <button
-            className="px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white flex items-center gap-1 text-slate-600 hover:bg-slate-50"
-            onClick={() => setShowImportStock(true)}
+            type="button"
+            className="px-3 py-2 text-[11px] rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 flex items-center gap-1.5"
+            onClick={() => setIsImportInventoryOpen(true)}
           >
-            <Upload size={14} /> Importar insumos
+            <Upload size={14} />
+            Importar insumos
           </button>
 
           <button
-            className="px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white flex items-center gap-1 text-slate-600 hover:bg-slate-50"
-            onClick={() => setShowImportAgenda(true)}
+            type="button"
+            className="px-3 py-2 text-[11px] rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 flex items-center gap-1.5"
+            onClick={() => setIsImportAgendaOpen(true)}
           >
-            <Upload size={14} /> Importar agenda
+            <CalendarClock size={14} />
+            Importar agenda
           </button>
 
           <button
-            className="px-3 py-2 text-xs rounded-lg bg-teal-600 text-white flex items-center gap-1 hover:bg-teal-700"
-            onClick={() => setShowAdd((v) => !v)}
+            type="button"
+            className="px-3 py-2 text-[11px] rounded-lg bg-teal-600 text-white hover:bg-teal-700 flex items-center gap-1.5"
+            onClick={() => setIsAdding((v) => !v)}
           >
-            <Plus size={14} /> Novo insumo
+            <Plus size={14} />
+            Novo insumo
           </button>
         </div>
       </div>
 
       {/* FORM NOVO INSUMO */}
-      {showAdd && (
+      {isAdding && (
         <form
           onSubmit={handleSubmitNewItem}
-          className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-4"
+          className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm text-xs space-y-3"
         >
-          <p className="text-sm font-semibold text-slate-700">
-            Cadastrar novo insumo
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] font-semibold text-slate-700">
+              Cadastrar novo insumo
+            </span>
+            <button
+              type="button"
+              className="text-slate-400 hover:text-slate-600"
+              onClick={() => setIsAdding(false)}
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div className="md:col-span-2">
-              <label className="block text-slate-500 mb-1">Nome</label>
+              <label className="block text-[11px] text-slate-500 mb-1">
+                Nome do insumo
+              </label>
               <input
                 type="text"
-                required
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                placeholder="Ex: Laennec"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/20 bg-slate-50"
+                placeholder="Ex: Laennec, Ozempic..."
                 value={newItem.name}
                 onChange={(e) =>
-                  setNewItem((old) => ({ ...old, name: e.target.value }))
+                  setNewItem((prev) => ({ ...prev, name: e.target.value }))
                 }
+                required
               />
             </div>
-            <div>
-              <label className="block text-slate-500 mb-1">Unidade</label>
-       <select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-teal-500/20 outline-none" value={newItem.unit} onChange={e => setNewItem({...newItem, unit: e.target.value})}>
-    <option value="ml">ml</option>
-    <option value="mg">mg</option>
-    <option value="un">un</option>
-    <option value="amp">amp</option>
-    <option value="fr">fr</option>
-    <option value="caixa">caixa</option>  {/* ⬅️ A NOVA OPÇÃO */}
-</select>
 
-            </div>
             <div>
-              <label className="block text-slate-500 mb-1">
+              <label className="block text-[11px] text-slate-500 mb-1">
+                Unidade
+              </label>
+              <select
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/20 bg-slate-50"
+                value={newItem.unit}
+                onChange={(e) =>
+                  setNewItem((prev) => ({ ...prev, unit: e.target.value }))
+                }
+              >
+                <option value="ml">ml</option>
+                <option value="mg">mg</option>
+                <option value="un">un</option>
+                <option value="amp">amp</option>
+                <option value="fr">fr</option>
+                <option value="caixa">caixa</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] text-slate-500 mb-1">
                 Estoque inicial
               </label>
               <input
                 type="number"
-                required
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/20 bg-slate-50"
                 value={newItem.quantity}
                 onChange={(e) =>
-                  setNewItem((old) => ({ ...old, quantity: e.target.value }))
+                  setNewItem((prev) => ({
+                    ...prev,
+                    quantity: e.target.value,
+                  }))
                 }
+                required
               />
             </div>
+
             <div>
-              <label className="block text-slate-500 mb-1">
+              <label className="block text-[11px] text-slate-500 mb-1">
                 Estoque mínimo
               </label>
               <input
                 type="number"
-                required
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/20 bg-slate-50"
                 value={newItem.minStock}
                 onChange={(e) =>
-                  setNewItem((old) => ({ ...old, minStock: e.target.value }))
+                  setNewItem((prev) => ({
+                    ...prev,
+                    minStock: e.target.value,
+                  }))
                 }
+                required
               />
             </div>
           </div>
-          <div className="flex justify-end gap-2">
+
+          <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
-              className="px-4 py-2 text-xs rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
-              onClick={() => setShowAdd(false)}
+              onClick={() => setIsAdding(false)}
+              className="px-3 py-2 text-[11px] rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs rounded-lg bg-teal-600 text-white hover:bg-teal-700"
+              className="px-4 py-2 text-[11px] rounded-lg bg-teal-600 text-white hover:bg-teal-700"
             >
               Salvar insumo
             </button>
@@ -906,67 +1011,85 @@ function InventoryTab({
       )}
 
       {/* GRID DE INSUMOS */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {filteredInventory.map((item) => {
-          const critical = item.quantity <= (item.minStock || 0);
+          const critical =
+            Number(item.quantity) <= Number(item.minStock || 0);
+
           return (
             <div
               key={item.id}
-              className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between relative"
+              className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between relative overflow-hidden"
             >
               <div
-                className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-xl ${
+                className={`absolute left-0 top-0 w-1 h-full ${
                   critical ? "bg-red-500" : "bg-teal-500"
                 }`}
               />
-              <div>
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <h3 className="font-semibold text-slate-700 text-sm pr-4">
-                    {item.name}
-                  </h3>
-                  <div className="flex gap-1">
-                    <button
-                      className="p-1 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded"
-                      title="Histórico"
-                      onClick={() => setSelectedForHistory(item)}
-                    >
-                      <History size={14} />
-                    </button>
-                    <button
-                      className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
-                      title="Excluir"
-                      onClick={() => setSelectedForDelete(item)}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
 
+              <div className="flex justify-between items-start gap-2 mb-1">
+                <div className="pr-4">
+                  <p className="text-sm font-semibold text-slate-800 truncate">
+                    {item.name}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    Unidade: {item.unit || "un"}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    className="p-1 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded"
+                    title="Editar insumo"
+                    onClick={() => setEditItem(item)}
+                  >
+                    <Edit2 size={14} />
+                  </button>
+                  <button
+                    className="p-1 text-slate-300 hover:text-slate-700 hover:bg-slate-50 rounded"
+                    title="Histórico de estoque"
+                    onClick={() => setHistoryItem(item)}
+                  >
+                    <History size={14} />
+                  </button>
+                  <button
+                    className="p-1 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded"
+                    title="Excluir insumo"
+                    onClick={() => setDeleteItem(item)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-2 mb-3">
                 <div className="flex items-baseline gap-1">
                   <span
-                    className={`text-3xl font-black ${
+                    className={`text-2xl font-bold ${
                       critical ? "text-red-600" : "text-slate-800"
                     }`}
                   >
-                    {item.quantity}
+                    {item.quantity ?? 0}
                   </span>
-                  <span className="text-xs text-slate-500">{item.unit}</span>
+                  <span className="text-[11px] text-slate-400">
+                    {item.unit}
+                  </span>
                 </div>
-
-                <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+                <div className="flex items-center gap-1 text-[11px] text-slate-400">
                   {critical && (
                     <AlertTriangle size={11} className="text-red-500" />
                   )}
-                  Mínimo: {item.minStock} {item.unit}
-                </p>
+                  Mínimo: {item.minStock ?? 0} {item.unit}
+                </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-slate-100">
+              <div className="pt-2 border-t border-slate-100 flex gap-2">
                 <button
-                  className="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-teal-50 hover:border-teal-200 flex items-center justify-center gap-1"
-                  onClick={() => setSelectedForEntry(item)}
+                  type="button"
+                  className="flex-1 px-3 py-1.5 text-[11px] rounded-lg border border-slate-200 text-slate-700 bg-slate-50 hover:bg-teal-50 hover:border-teal-200 hover:text-teal-700 flex items-center justify-center gap-1.5"
+                  onClick={() => setStockEntryItem(item)}
                 >
-                  <Plus size={12} /> Entrada de estoque
+                  <Plus size={12} />
+                  Entrada de estoque
                 </button>
               </div>
             </div>
@@ -974,101 +1097,95 @@ function InventoryTab({
         })}
 
         {filteredInventory.length === 0 && (
-          <div className="col-span-full bg-white border border-dashed border-slate-300 rounded-xl p-8 text-center text-slate-400 text-sm">
+          <div className="col-span-full bg-white border border-dashed border-slate-300 rounded-xl p-8 text-center text-xs text-slate-400">
             Nenhum insumo encontrado.
           </div>
         )}
       </div>
 
       {/* MODAL IMPORTAR INSUMOS */}
-      {showImportStock && (
+      {isImportInventoryOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-sm w-full p-5">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-sm w-full p-5 text-xs">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-700">
                 Importar insumos (.csv)
               </h3>
               <button
                 className="text-slate-400 hover:text-slate-600"
-                onClick={() => setShowImportStock(false)}
+                onClick={() => setIsImportInventoryOpen(false)}
               >
                 <X size={16} />
               </button>
             </div>
             <p className="text-[11px] text-slate-500 mb-3">
-              Formato esperado: <br />
-              <code className="bg-slate-50 px-1 py-0.5 rounded">
-                Nome, Unidade, Quantidade, Minimo
+              Formato esperado (sem cabeçalho obrigatório):<br />
+              <code className="bg-slate-50 px-2 py-1 rounded inline-block mt-1">
+                Nome,Unidade,QuantidadeInicial,EstoqueMinimo
               </code>
             </p>
-            <div className="border border-dashed border-slate-300 rounded-lg p-6 text-center text-xs text-slate-500 bg-slate-50">
-              <Upload size={18} className="mx-auto mb-2 text-slate-400" />
-              <p className="mb-1">Selecione o arquivo CSV do seu computador</p>
+            <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center bg-slate-50">
+              <Upload className="mx-auto mb-2 text-slate-400" size={20} />
+              <p className="text-[11px] text-slate-500 mb-1">
+                Clique para selecionar o arquivo CSV
+              </p>
               <input
                 type="file"
                 accept=".csv"
-                className="mt-2 text-xs"
-                onChange={handleStockFileChange}
+                className="mt-2 text-[11px]"
+                onChange={handleFileImportInventory}
               />
             </div>
-            <button
-              className="mt-4 w-full text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
-              onClick={() => setShowImportStock(false)}
-            >
-              Cancelar
-            </button>
           </div>
         </div>
       )}
 
       {/* MODAL IMPORTAR AGENDA */}
-      {showImportAgenda && (
+      {isImportAgendaOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-sm w-full p-5">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-sm w-full p-5 text-xs">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-700">
                 Importar agenda (.csv)
               </h3>
               <button
                 className="text-slate-400 hover:text-slate-600"
-                onClick={() => setShowImportAgenda(false)}
+                onClick={() => setIsImportAgendaOpen(false)}
               >
                 <X size={16} />
               </button>
             </div>
             <p className="text-[11px] text-slate-500 mb-3">
-              Formato esperado: <br />
-              <code className="bg-slate-50 px-1 py-0.5 rounded">
-                Paciente, NomeInsumo, Dose, YYYY-MM-DD
-              </code>
+              Formato esperado com cabeçalho:
               <br />
-              O nome do insumo deve ser exatamente igual ao cadastrado no
-              estoque.
+              <code className="bg-slate-50 px-2 py-1 rounded inline-block mt-1">
+                patientName,medicationName,dose,date
+              </code>
             </p>
-            <div className="border border-dashed border-slate-300 rounded-lg p-6 text-center text-xs text-slate-500 bg-slate-50">
-              <Upload size={18} className="mx-auto mb-2 text-slate-400" />
-              <p className="mb-1">Selecione o arquivo CSV do seu computador</p>
+            <p className="text-[11px] text-slate-500 mb-3">
+              A dose deve usar ponto como decimal (ex:{" "}
+              <strong>7.5</strong>).
+            </p>
+            <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center bg-slate-50">
+              <Upload className="mx-auto mb-2 text-slate-400" size={20} />
+              <p className="text-[11px] text-slate-500 mb-1">
+                Clique para selecionar o arquivo CSV
+              </p>
               <input
                 type="file"
                 accept=".csv"
-                className="mt-2 text-xs"
-                onChange={handleAgendaFileChange}
+                className="mt-2 text-[11px]"
+                onChange={handleFileImportAgenda}
               />
             </div>
-            <button
-              className="mt-4 w-full text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
-              onClick={() => setShowImportAgenda(false)}
-            >
-              Cancelar
-            </button>
           </div>
         </div>
       )}
 
-      {/* MODAL ENTRADA DE ESTOQUE */}
-      {selectedForEntry && (
+      {/* MODAL ENTRADA ESTOQUE */}
+      {stockEntryItem && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-sm w-full p-5">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-sm w-full p-5 text-xs">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-700">
                 Entrada de estoque
@@ -1076,42 +1193,43 @@ function InventoryTab({
               <button
                 className="text-slate-400 hover:text-slate-600"
                 onClick={() => {
-                  setSelectedForEntry(null);
-                  setEntryQty("");
+                  setStockEntryItem(null);
+                  setStockEntryValue("");
                 }}
               >
                 <X size={16} />
               </button>
             </div>
-            <p className="text-xs text-slate-500 mb-3">
-              Insumo:{" "}
+            <p className="text-[11px] text-slate-500 mb-2">
+              Insumo:
+              <br />
               <span className="font-semibold text-slate-700">
-                {selectedForEntry.name}
+                {stockEntryItem.name}
               </span>
             </p>
             <label className="block text-[11px] text-slate-500 mb-1">
-              Quantidade ({selectedForEntry.unit})
+              Quantidade ({stockEntryItem.unit})
             </label>
             <input
               type="number"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-              value={entryQty}
-              onChange={(e) => setEntryQty(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 mb-4"
+              value={stockEntryValue}
+              onChange={(e) => setStockEntryValue(e.target.value)}
+              placeholder="Ex: 10"
             />
             <div className="flex gap-2">
               <button
-                className="flex-1 text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
+                className="flex-1 text-[11px] px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
                 onClick={() => {
-                  setSelectedForEntry(null);
-                  setEntryQty("");
+                  setStockEntryItem(null);
+                  setStockEntryValue("");
                 }}
               >
                 Cancelar
               </button>
               <button
-                className="flex-1 text-xs px-3 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700"
-                onClick={confirmEntry}
-                disabled={!entryQty}
+                className="flex-1 text-[11px] px-3 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700"
+                onClick={handleConfirmEntry}
               >
                 Confirmar
               </button>
@@ -1120,38 +1238,31 @@ function InventoryTab({
         </div>
       )}
 
-      {/* MODAL EXCLUIR */}
-      {selectedForDelete && (
+      {/* MODAL EXCLUIR INSUMO */}
+      {deleteItem && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-sm w-full p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-slate-700">
-                Excluir insumo
-              </h3>
-              <button
-                className="text-slate-400 hover:text-slate-600"
-                onClick={() => setSelectedForDelete(null)}
-              >
-                <X size={16} />
-              </button>
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-sm w-full p-5 text-xs">
+            <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-3">
+              <Trash2 size={18} className="text-red-600" />
             </div>
-            <p className="text-xs text-slate-500 mb-4">
-              Tem certeza que deseja excluir o insumo{" "}
-              <span className="font-semibold text-slate-700">
-                {selectedForDelete.name}
-              </span>
-              ?
+            <h3 className="text-sm font-semibold text-slate-700 text-center mb-1">
+              Excluir insumo
+            </h3>
+            <p className="text-[11px] text-slate-500 text-center mb-4">
+              Tem certeza que deseja remover o insumo{" "}
+              <strong>{deleteItem.name}</strong>? Essa ação não pode ser
+              desfeita.
             </p>
             <div className="flex gap-2">
               <button
-                className="flex-1 text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
-                onClick={() => setSelectedForDelete(null)}
+                className="flex-1 text-[11px] px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
+                onClick={() => setDeleteItem(null)}
               >
                 Cancelar
               </button>
               <button
-                className="flex-1 text-xs px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700"
-                onClick={confirmDelete}
+                className="flex-1 text-[11px] px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700"
+                onClick={handleConfirmDelete}
               >
                 Excluir
               </button>
@@ -1161,85 +1272,179 @@ function InventoryTab({
       )}
 
       {/* MODAL HISTÓRICO */}
-      {selectedForHistory && (
+      {historyItem && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full p-5 max-h-[80vh] flex flex-col">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full p-5 text-xs max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <h3 className="text-sm font-semibold text-slate-700">
-                  Histórico de movimentos
+                <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                  <History size={14} className="text-teal-600" />
+                  Histórico de estoque
                 </h3>
                 <p className="text-[11px] text-slate-500">
-                  {selectedForHistory.name}
+                  {historyItem.name}
                 </p>
               </div>
               <button
                 className="text-slate-400 hover:text-slate-600"
-                onClick={() => setSelectedForHistory(null)}
+                onClick={() => setHistoryItem(null)}
               >
                 <X size={16} />
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-              {logsForSelected.length === 0 && (
-                <p className="text-xs text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-lg p-4 text-center">
-                  Nenhum movimento registrado para este insumo.
+              {logsForHistory.length === 0 && (
+                <p className="text-[11px] text-slate-400 text-center py-4">
+                  Nenhum registro encontrado para este insumo.
                 </p>
               )}
 
-              {logsForSelected.map((log) => {
-                const created =
+              {logsForHistory.map((log) => {
+                const dt =
                   log.createdAt?.seconds != null
                     ? new Date(log.createdAt.seconds * 1000)
                     : null;
-
-                let tipo = "Entrada";
-                let cor = "text-teal-700 bg-teal-50";
-                if (log.type === "usage") {
-                  tipo = "Uso em aplicação";
-                  cor = "text-slate-700 bg-slate-50";
-                }
-                if (log.type === "reversal") {
-                  tipo = "Estorno";
-                  cor = "text-amber-700 bg-amber-50";
-                }
+                const isReversal = log.type === "reversal";
+                const isUsage = log.type === "usage";
+                const isEntry = log.type === "entry";
 
                 return (
                   <div
                     key={log.id}
-                    className="border border-slate-100 rounded-lg p-3 text-xs flex justify-between items-center"
+                    className="border border-slate-100 rounded-lg px-3 py-2 flex items-center justify-between bg-slate-50"
                   >
                     <div>
-                      <p className="font-semibold text-slate-700">
-                        {tipo}{" "}
-                        <span className="text-slate-500 font-normal">
-                          (+{log.quantity} {selectedForHistory.unit})
-                        </span>
+                      <p className="text-[11px] font-semibold text-slate-700">
+                        {isEntry && "Entrada"}
+                        {isUsage && "Saída / aplicação"}
+                        {isReversal && "Estorno"}
                       </p>
-                      <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-1">
-                        <Clock size={10} />{" "}
-                        {created
-                          ? created.toLocaleString("pt-BR")
-                          : "Data não registrada"}
+                      <p className="text-[11px] text-slate-500">
+                        Quantidade:{" "}
+                        <strong>{log.quantity ?? 0}</strong>{" "}
+                        {historyItem.unit}
                       </p>
                     </div>
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${cor}`}
-                    >
-                      {log.type}
-                    </span>
+                    <div className="text-right text-[10px] text-slate-400">
+                      {dt && (
+                        <>
+                          <div>{dt.toLocaleDateString("pt-BR")}</div>
+                          <div>
+                            {dt.toLocaleTimeString("pt-BR", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
 
             <button
-              className="mt-3 w-full text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
-              onClick={() => setSelectedForHistory(null)}
+              className="mt-3 w-full text-[11px] px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
+              onClick={() => setHistoryItem(null)}
             >
               Fechar
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDITAR INSUMO */}
+      {editItem && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-sm w-full p-5 text-xs">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                <Edit2 size={14} className="text-blue-600" />
+                Editar insumo
+              </h3>
+              <button
+                className="text-slate-400 hover:text-slate-600"
+                onClick={() => setEditItem(null)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <label className="block text-[11px] text-slate-500 mb-1">
+              Nome
+            </label>
+            <input
+              type="text"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 bg-slate-50"
+              value={editItem.name}
+              onChange={(e) =>
+                setEditItem((prev) => ({ ...prev, name: e.target.value }))
+              }
+            />
+
+            <label className="block text-[11px] text-slate-500 mb-1">
+              Unidade
+            </label>
+            <select
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 bg-slate-50"
+              value={editItem.unit}
+              onChange={(e) =>
+                setEditItem((prev) => ({ ...prev, unit: e.target.value }))
+              }
+            >
+              <option value="ml">ml</option>
+              <option value="mg">mg</option>
+              <option value="un">un</option>
+              <option value="amp">amp</option>
+              <option value="fr">fr</option>
+              <option value="caixa">caixa</option>
+            </select>
+
+            <label className="block text-[11px] text-slate-500 mb-1">
+              Estoque mínimo
+            </label>
+            <input
+              type="number"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 bg-slate-50"
+              value={editItem.minStock ?? 0}
+              onChange={(e) =>
+                setEditItem((prev) => ({
+                  ...prev,
+                  minStock: e.target.value,
+                }))
+              }
+            />
+
+            <label className="block text-[11px] text-slate-500 mb-1">
+              Estoque atual
+            </label>
+            <input
+              type="number"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500/20 bg-slate-50"
+              value={editItem.quantity ?? 0}
+              onChange={(e) =>
+                setEditItem((prev) => ({
+                  ...prev,
+                  quantity: e.target.value,
+                }))
+              }
+            />
+
+            <div className="flex gap-2 justify-end">
+              <button
+                className="px-3 py-2 text-[11px] rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
+                onClick={() => setEditItem(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                className="px-4 py-2 text-[11px] rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                onClick={handleSaveEditItem}
+              >
+                Salvar alterações
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1247,355 +1452,439 @@ function InventoryTab({
   );
 }
 // ============================
-// HELPER PARA TRATAR CAMPOS DE DATA
+// PARTE 3 - HELPERS DE DATA
 // ============================
-function getScheduleDate(rec) {
-  if (!rec) return null;
-  const d = rec.date;
 
-  // Timestamp do Firestore
-  if (d instanceof Timestamp) return d.toDate();
-  if (d?.seconds != null) return new Date(d.seconds * 1000);
+// Converte qualquer formato (Timestamp, {seconds}, string) em Date
+function getDateFromField(value) {
+  if (!value) return null;
 
-  // String "YYYY-MM-DD"
-  if (typeof d === "string") return new Date(d + "T00:00:00");
+  // Firestore Timestamp
+  if (value.toDate && typeof value.toDate === "function") {
+    return value.toDate();
+  }
 
-  // Date direto
-  if (d instanceof Date) return d;
+  // Objeto com seconds
+  if (value.seconds != null) {
+    return new Date(value.seconds * 1000);
+  }
 
-  return null;
+  // String (YYYY-MM-DD)
+  if (typeof value === "string") {
+    const d = new Date(value + "T00:00:00");
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  // Fallback
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function formatDateShort(value) {
+  const d = getDateFromField(value);
+  if (!d) return "";
+  return d.toLocaleDateString("pt-BR");
+}
+
+function isPastDate(value) {
+  const d = getDateFromField(value);
+  if (!d) return false;
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime() < hoje.getTime();
 }
 
 // ============================
 // PARTE 3 - ABA ENFERMARIA / AGENDA
 // ============================
-function ScheduleTab({
-  inventory,
-  schedule,
-  onSchedule,
-  onApply,
-  onUndo,
-  onDelete,
-}) {
-  const [patientName, setPatientName] = useState("");
-  const [startDate, setStartDate] = useState(
-    new Date().toISOString().split("T")[0]
-  );
-  const [sessions, setSessions] = useState(1);
-  const [items, setItems] = useState([
-    { id: Date.now(), medicationId: "", dose: "" },
-  ]);
+function ScheduleTab({ inventory, schedule, onSchedule, onApply, onUndo, onDelete }) {
+  const todayStr = new Date().toISOString().split("T")[0];
 
-  const [applyRecord, setApplyRecord] = useState(null);
-  const [applyDate, setApplyDate] = useState(
-    new Date().toISOString().split("T")[0]
-  );
+  const [newPatient, setNewPatient] = React.useState({
+    patientName: "",
+    date: todayStr,
+    sessions: 1,
+    items: [
+      {
+        id: Date.now(),
+        medicationId: "",
+        dose: "",
+      },
+    ],
+  });
 
-  // Pendentes e histórico
-  const pending = schedule.filter((s) => s.status === "scheduled");
-  const applied = schedule
-    .filter((s) => s.status === "applied")
-    .sort((a, b) => {
-      const da = a.appliedAt?.seconds || 0;
-      const db = b.appliedAt?.seconds || 0;
-      return db - da;
-    });
+  const [applyModalItem, setApplyModalItem] = React.useState(null);
+  const [applyDate, setApplyDate] = React.useState(todayStr);
 
-  // --------- gestão das linhas de insumos no formulário ----------
+  // ----- FORM: MANIPULAR LINHAS DE INSUMOS -----
   const addLine = () => {
-    setItems((prev) => [
+    setNewPatient((prev) => ({
       ...prev,
-      { id: Date.now() + Math.random(), medicationId: "", dose: "" },
-    ]);
-  };
-
-  const updateLine = (id, field, value) => {
-    setItems((prev) =>
-      prev.map((it) => (it.id === id ? { ...it, [field]: value } : it))
-    );
+      items: [
+        ...prev.items,
+        {
+          id: Date.now() + Math.random(),
+          medicationId: "",
+          dose: "",
+        },
+      ],
+    }));
   };
 
   const removeLine = (id) => {
-    setItems((prev) =>
-      prev.length === 1 ? prev : prev.filter((it) => it.id !== id)
-    );
+    setNewPatient((prev) => {
+      if (prev.items.length === 1) return prev; // sempre pelo menos 1 linha
+      return {
+        ...prev,
+        items: prev.items.filter((i) => i.id !== id),
+      };
+    });
   };
 
-  // --------- submit do agendamento ----------
-  const handleSubmit = async (e) => {
+  const updateLine = (id, field, value) => {
+    setNewPatient((prev) => ({
+      ...prev,
+      items: prev.items.map((i) =>
+        i.id === id ? { ...i, [field]: value } : i
+      ),
+    }));
+  };
+
+  const handleSubmit = (e) => {
     e.preventDefault();
-    if (!patientName.trim()) {
+    if (!newPatient.patientName.trim()) {
       alert("Informe o nome do paciente.");
       return;
     }
 
-    const cleanItems = items
-      .filter((it) => it.medicationId && it.dose)
-      .map(({ id, ...rest }) => rest);
+    const cleanedItems = newPatient.items
+      .filter((i) => i.medicationId && i.dose)
+      .map((i) => ({
+        medicationId: i.medicationId,
+        dose: Number(i.dose.toString().replace(",", ".")) || 0,
+      }));
 
-    if (cleanItems.length === 0) {
-      alert("Informe ao menos um insumo e dose.");
+    if (cleanedItems.length === 0) {
+      alert("Informe pelo menos um insumo e dose.");
       return;
     }
 
-    const totalSessions = Math.max(1, Number(sessions) || 1);
-    const base = new Date(startDate + "T00:00:00");
+    const sessions = Number(newPatient.sessions) || 1;
+    const startDate = new Date(newPatient.date + "T00:00:00");
+    if (isNaN(startDate.getTime())) {
+      alert("Data inicial inválida.");
+      return;
+    }
 
-    for (let idx = 0; idx < totalSessions; idx++) {
-      const d = new Date(base);
-      d.setDate(base.getDate() + idx * 7); // semanal
-      const ts = Timestamp.fromDate(d);
+    for (let i = 0; i < sessions; i++) {
+      const d = new Date(startDate);
+      d.setDate(startDate.getDate() + i * 7); // semanal
 
-      await onSchedule({
-        patientName: patientName.trim(),
-        items: cleanItems,
-        date: ts,
-        sessions: totalSessions,
-        sessionIndex: idx + 1,
+      onSchedule({
+        patientName: newPatient.patientName.trim(),
+        items: cleanedItems,
+        date: Timestamp.fromDate(d), // salva como Timestamp
+        status: "scheduled",
+        sessionInfo: sessions > 1 ? `${i + 1}/${sessions}` : null,
       });
     }
 
-    // limpa formulário
-    setPatientName("");
-    setStartDate(new Date().toISOString().split("T")[0]);
-    setSessions(1);
-    setItems([{ id: Date.now(), medicationId: "", dose: "" }]);
+    setNewPatient({
+      patientName: "",
+      date: todayStr,
+      sessions: 1,
+      items: [
+        {
+          id: Date.now(),
+          medicationId: "",
+          dose: "",
+        },
+      ],
+    });
   };
 
-  // --------- aplicar / desfazer ----------
-  const openApplyModal = (record) => {
-    setApplyRecord(record);
-    setApplyDate(new Date().toISOString().split("T")[0]);
+  // ----- ABRIR / CONFIRMAR MODAL DE APLICAÇÃO -----
+  const openApplyModal = (item) => {
+    setApplyModalItem(item);
+    setApplyDate(todayStr);
   };
 
-  const confirmApply = async () => {
-    if (!applyRecord || !applyDate) return;
-    await onApply(applyRecord, applyDate);
-    setApplyRecord(null);
+  const confirmApply = () => {
+    if (!applyModalItem || !applyDate) return;
+    onApply(applyModalItem, applyDate);
+    setApplyModalItem(null);
   };
 
-  const handleUndoClick = async (rec) => {
-    await onUndo(rec);
-  };
-
-  // --------- render ----------
-  const renderMedsSummary = (rec) => {
-    const meds = (rec.items || []).map((it) => {
-      const inv = inventory.find((i) => i.id === it.medicationId);
-      return {
-        ...it,
-        name: inv?.name || "Insumo removido",
-        unit: inv?.unit || "",
-      };
+  // ----- LISTAS: PENDENTES E HISTÓRICO -----
+  const pending = schedule
+    .filter((s) => s.status === "scheduled")
+    .sort((a, b) => {
+      const da = getDateFromField(a.date) || new Date(0);
+      const db = getDateFromField(b.date) || new Date(0);
+      return da - db;
     });
 
-    return (
-      <ul className="mt-1 text-xs text-slate-600 space-y-0.5">
-        {meds.map((m, idx) => (
-          <li key={idx}>
-            • {m.name} —{" "}
-            <span className="font-semibold">
-              {m.dose} {m.unit}
-            </span>
-          </li>
-        ))}
-      </ul>
-    );
-  };
+  const history = schedule
+    .filter((s) => s.status === "applied")
+    .sort((a, b) => {
+      const da = getDateFromField(a.appliedAt) || new Date(0);
+      const db = getDateFromField(b.appliedAt) || new Date(0);
+      return db - da;
+    });
 
-  const isLate = (rec) => {
-    const d = getScheduleDate(rec);
-    if (!d) return false;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime() < today.getTime();
+  // ----- RENDER RESUMO DOS INSUMOS EM UMA APLICAÇÃO -----
+  const renderItemsSummary = (items) => {
+    if (!items || items.length === 0) return null;
+    return (
+      <div className="mt-1 space-y-0.5">
+        {items.map((it, idx) => {
+          const inv = it.medicationId
+            ? inventory.find((x) => x.id === it.medicationId)
+            : null;
+          const name = inv?.name || it.medicationName || "Insumo";
+          const unit = inv?.unit || "";
+          return (
+            <div
+              key={idx}
+              className="flex items-center gap-1.5 text-[11px] text-slate-500"
+            >
+              <Syringe size={11} className="text-slate-400" />
+              <span className="truncate">{name}</span>
+              <span className="text-slate-300">•</span>
+              <span className="font-semibold text-teal-600">
+                {it.dose} {unit}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   return (
     <div className="space-y-6">
-      {/* FORMULÁRIO DE AGENDAMENTO */}
-      <section className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-          <Users size={16} className="text-teal-600" />
-          Agendar protocolo
-        </h2>
+      {/* FORM NOVO AGENDAMENTO */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm text-xs space-y-3">
+        <div className="flex items-center justify-between mb-1">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+              <Calendar size={16} className="text-teal-600" />
+              Agendar protocolo
+            </h2>
+            <p className="text-[11px] text-slate-500">
+              Monte protocolos com múltiplos insumos e repetições semanais.
+            </p>
+          </div>
+        </div>
 
         <form
           onSubmit={handleSubmit}
-          className="grid grid-cols-1 md:grid-cols-12 gap-3 text-xs"
+          className="grid grid-cols-1 md:grid-cols-12 gap-3 items-start"
         >
           <div className="md:col-span-12">
-            <label className="block text-slate-500 mb-1">
-              Nome do paciente
+            <label className="block text-[11px] text-slate-500 mb-1">
+              Paciente
             </label>
             <input
               type="text"
               required
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-              placeholder="Nome completo"
-              value={patientName}
-              onChange={(e) => setPatientName(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              placeholder="Nome completo do paciente"
+              value={newPatient.patientName}
+              onChange={(e) =>
+                setNewPatient((prev) => ({
+                  ...prev,
+                  patientName: e.target.value,
+                }))
+              }
             />
           </div>
 
-          <div className="md:col-span-12 bg-slate-50 border border-slate-200 rounded-lg p-3">
+          <div className="md:col-span-12 bg-slate-50 border border-slate-100 rounded-lg p-3">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-[11px] font-semibold text-slate-600">
+              <span className="text-[11px] font-semibold text-slate-700">
                 Insumos do protocolo
-              </p>
+              </span>
               <button
                 type="button"
-                className="text-[11px] text-teal-700 hover:underline flex items-center gap-1"
+                className="text-[11px] text-teal-600 hover:underline flex items-center gap-1"
                 onClick={addLine}
               >
-                <Plus size={10} /> Adicionar insumo
+                <Plus size={11} />
+                Adicionar insumo
               </button>
             </div>
 
-            {items.map((it) => (
-              <div
-                key={it.id}
-                className="flex items-center gap-2 mb-2 text-xs"
-              >
-                <select
-                  className="flex-1 border border-slate-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/20 bg-white"
-                  value={it.medicationId}
-                  onChange={(e) =>
-                    updateLine(it.id, "medicationId", e.target.value)
-                  }
-                  required
+            <div className="space-y-2">
+              {newPatient.items.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-2 py-2"
                 >
-                  <option value="">Selecione o insumo...</option>
-                  {inventory.map((inv) => (
-                    <option key={inv.id} value={inv.id}>
-                      {inv.name} ({inv.unit})
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  step="0.1"
-                  className="w-24 border border-slate-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                  placeholder="Dose"
-                  value={it.dose}
-                  onChange={(e) => updateLine(it.id, "dose", e.target.value)}
-                  required
-                />
-                {items.length > 1 && (
-                  <button
-                    type="button"
-                    className="p-1 text-red-500 hover:bg-red-50 rounded"
-                    onClick={() => removeLine(it.id)}
+                  <select
+                    className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                    value={item.medicationId}
+                    onChange={(e) =>
+                      updateLine(item.id, "medicationId", e.target.value)
+                    }
+                    required
                   >
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </div>
-            ))}
+                    <option value="">Selecione o insumo...</option>
+                    {inventory
+                      .slice()
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map((inv) => (
+                        <option key={inv.id} value={inv.id}>
+                          {inv.name} ({inv.unit})
+                        </option>
+                      ))}
+                  </select>
+
+                  <input
+                    type="number"
+                    className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                    placeholder="Dose"
+                    value={item.dose}
+                    onChange={(e) =>
+                      updateLine(item.id, "dose", e.target.value)
+                    }
+                    required
+                  />
+
+                  {newPatient.items.length > 1 && (
+                    <button
+                      type="button"
+                      className="p-1 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded"
+                      onClick={() => removeLine(item.id)}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div className="md:col-span-6">
-            <label className="block text-slate-500 mb-1">Data inicial</label>
+          <div className="md:col-span-4">
+            <label className="block text-[11px] text-slate-500 mb-1">
+              Início
+            </label>
             <input
               type="date"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[11px] bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              value={newPatient.date}
+              onChange={(e) =>
+                setNewPatient((prev) => ({ ...prev, date: e.target.value }))
+              }
               required
             />
           </div>
 
-          <div className="md:col-span-6">
-            <label className="block text-slate-500 mb-1">
-              Repetições semanais
+          <div className="md:col-span-4">
+            <label className="block text-[11px] text-slate-500 mb-1">
+              Repetições (semanas)
             </label>
             <input
               type="number"
               min={1}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-              value={sessions}
-              onChange={(e) => setSessions(e.target.value)}
+              max={52}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[11px] bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              value={newPatient.sessions}
+              onChange={(e) =>
+                setNewPatient((prev) => ({
+                  ...prev,
+                  sessions: e.target.value,
+                }))
+              }
             />
           </div>
 
-          <div className="md:col-span-12 mt-2">
+          <div className="md:col-span-4 flex items-end">
             <button
               type="submit"
-              className="w-full bg-teal-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-teal-700"
+              className="w-full bg-teal-600 text-white rounded-lg px-3 py-2 text-[11px] font-semibold hover:bg-teal-700 flex items-center justify-center gap-1.5"
             >
+              <Plus size={13} />
               Agendar protocolo
             </button>
           </div>
         </form>
-      </section>
+      </div>
 
-      {/* LISTAS: FILA DE APLICAÇÃO & HISTÓRICO */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* FILA */}
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-amber-500" />
+      {/* LISTAS: PENDENTES E HISTÓRICO */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* PENDENTES */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500" />
               Fila de aplicação
             </h3>
-            <span className="text-[11px] px-2 py-1 rounded-full bg-amber-50 text-amber-700 font-semibold">
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-100">
               {pending.length} pendente(s)
             </span>
           </div>
 
           {pending.length === 0 && (
-            <p className="text-xs text-slate-400 text-center py-6">
+            <div className="bg-white border border-dashed border-slate-200 rounded-xl p-6 text-center text-[11px] text-slate-400">
               Nenhum paciente na fila.
-            </p>
+            </div>
           )}
 
-          <div className="space-y-3 max-h-[420px] overflow-y-auto">
-            {pending.map((rec) => {
-              const d = getScheduleDate(rec);
-              const atrasado = isLate(rec);
+          <div className="space-y-2">
+            {pending.map((item) => {
+              const late = isPastDate(item.date);
+              const dt = formatDateShort(item.date);
+
               return (
                 <div
-                  key={rec.id}
-                  className="border border-slate-100 rounded-lg p-3 text-xs flex justify-between items-start gap-3 hover:bg-slate-50"
+                  key={item.id}
+                  className="bg-white border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3 shadow-sm"
                 >
-                  <div>
-                    <p className="font-semibold text-slate-700">
-                      {rec.patientName}{" "}
-                      {rec.sessionIndex && rec.sessions && (
-                        <span className="text-[10px] text-slate-500 ml-1">
-                          ({rec.sessionIndex}/{rec.sessions})
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-slate-800 truncate">
+                        {item.patientName}
+                      </p>
+                      {item.sessionInfo && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">
+                          {item.sessionInfo}
                         </span>
                       )}
-                    </p>
-                    {renderMedsSummary(rec)}
-                    <p
-                      className={`mt-1 text-[11px] flex items-center gap-1 ${
-                        atrasado ? "text-red-600" : "text-slate-400"
-                      }`}
-                    >
-                      {atrasado && (
-                        <AlertTriangle size={10} className="text-red-500" />
-                      )}
-                      Agendado:{" "}
-                      {d ? d.toLocaleDateString("pt-BR") : "sem data"}
-                    </p>
-                  </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <div className="flex gap-1">
-                      <button
-                        className="p-1 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded"
-                        title="Excluir agendamento"
-                        onClick={() => onDelete(rec.id)}
-                      >
-                        <Trash2 size={14} />
-                      </button>
                     </div>
+                    {renderItemsSummary(item.items)}
+                    <div className="mt-1 flex items-center gap-1 text-[10px]">
+                      {late && (
+                        <AlertTriangle
+                          size={10}
+                          className="text-red-500"
+                        />
+                      )}
+                      <span
+                        className={
+                          late
+                            ? "text-red-600 font-medium"
+                            : "text-slate-400"
+                        }
+                      >
+                        Agendado: {dt || "-"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-end gap-1 text-[11px]">
                     <button
-                      className="mt-1 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-[11px] font-semibold hover:bg-teal-700"
-                      onClick={() => openApplyModal(rec)}
+                      className="px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
+                      onClick={() => onDelete(item.id)}
                     >
-                      Aplicar agora
+                      <Trash2 size={12} />
+                    </button>
+                    <button
+                      className="px-3 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 flex items-center gap-1"
+                      onClick={() => openApplyModal(item)}
+                    >
+                      Aplicar
                     </button>
                   </div>
                 </div>
@@ -1605,63 +1894,65 @@ function ScheduleTab({
         </div>
 
         {/* HISTÓRICO */}
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-slate-300" />
-              Histórico recente
-            </h3>
-          </div>
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-slate-400" />
+            Últimas aplicações
+          </h3>
 
-          {applied.length === 0 && (
-            <p className="text-xs text-slate-400 text-center py-6">
-              Nenhuma aplicação registrada.
-            </p>
+          {history.length === 0 && (
+            <div className="bg-white border border-dashed border-slate-200 rounded-xl p-6 text-center text-[11px] text-slate-400">
+              Nenhuma aplicação registrada ainda.
+            </div>
           )}
 
-          <div className="space-y-2 max-h-[420px] overflow-y-auto">
-            {applied.slice(0, 15).map((rec) => {
-              const appliedAt =
-                rec.appliedAt?.seconds != null
-                  ? new Date(rec.appliedAt.seconds * 1000)
-                  : null;
-
+          <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
+            {history.slice(0, 15).map((item) => {
+              const d = getDateFromField(item.appliedAt);
               return (
                 <div
-                  key={rec.id}
-                  className="border border-slate-100 rounded-lg p-3 text-xs flex justify-between items-center hover:bg-slate-50"
+                  key={item.id}
+                  className="px-3 py-2 flex items-center justify-between gap-3 text-[11px] hover:bg-slate-50"
                 >
-                  <div>
-                    <p className="font-semibold text-slate-700">
-                      {rec.patientName}{" "}
-                      {rec.sessionIndex && rec.sessions && (
-                        <span className="text-[10px] text-slate-500 ml-1">
-                          ({rec.sessionIndex}/{rec.sessions})
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <CheckCircle
+                        size={12}
+                        className="text-teal-500"
+                      />
+                      <span className="font-semibold text-slate-700 truncate">
+                        {item.patientName}
+                      </span>
+                      {item.sessionInfo && (
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">
+                          {item.sessionInfo}
                         </span>
                       )}
-                    </p>
-                    {renderMedsSummary(rec)}
-                  </div>
-                  <div className="text-right flex flex-col items-end gap-1">
-                    <div className="flex items-center gap-1">
-                      <CheckCircle size={12} className="text-teal-500" />
-                      <span className="text-[10px] text-teal-700 font-semibold">
-                        Aplicado
-                      </span>
                     </div>
-                    {appliedAt && (
-                      <p className="text-[10px] text-slate-400">
-                        {appliedAt.toLocaleDateString("pt-BR")}{" "}
-                        {appliedAt.toLocaleTimeString("pt-BR", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </p>
-                    )}
+                    {renderItemsSummary(item.items)}
+                  </div>
+
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="text-right text-[10px] text-slate-400">
+                      {d && (
+                        <>
+                          <div>
+                            {d.toLocaleDateString("pt-BR")}
+                          </div>
+                          <div>
+                            {d.toLocaleTimeString("pt-BR", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
                     <button
-                      className="mt-1 text-[11px] text-amber-700 hover:underline"
-                      onClick={() => handleUndoClick(rec)}
+                      className="px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 flex items-center gap-1"
+                      onClick={() => onUndo(item)}
                     >
+                      <Clock size={11} />
                       Desfazer
                     </button>
                   </div>
@@ -1670,41 +1961,54 @@ function ScheduleTab({
             })}
           </div>
         </div>
-      </section>
+      </div>
 
-      {/* MODAL APLICAR */}
-      {applyRecord && (
+      {/* MODAL CONFIRMAR APLICAÇÃO */}
+      {applyModalItem && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-sm w-full p-5">
-            <h3 className="text-sm font-semibold text-slate-700 mb-2">
-              Confirmar aplicação
-            </h3>
-            <p className="text-xs text-slate-500 mb-3">
-              Paciente:{" "}
-              <span className="font-semibold text-slate-700">
-                {applyRecord.patientName}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-sm w-full p-5 text-xs">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                <CheckCircle size={14} className="text-teal-600" />
+                Confirmar aplicação
+              </h3>
+              <button
+                className="text-slate-400 hover:text-slate-600"
+                onClick={() => setApplyModalItem(null)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-500 mb-2">
+              Paciente:
+              <br />
+              <span className="font-semibold text-slate-800">
+                {applyModalItem.patientName}
               </span>
             </p>
 
-            <label className="block text-[11px] text-slate-500 mb-1">
+            {renderItemsSummary(applyModalItem.items)}
+
+            <label className="block text-[11px] text-slate-500 mt-3 mb-1">
               Data real da aplicação
             </label>
             <input
               type="date"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[11px] mb-4 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
               value={applyDate}
               onChange={(e) => setApplyDate(e.target.value)}
             />
 
             <div className="flex gap-2">
               <button
-                className="flex-1 text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
-                onClick={() => setApplyRecord(null)}
+                className="flex-1 text-[11px] px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
+                onClick={() => setApplyModalItem(null)}
               >
                 Cancelar
               </button>
               <button
-                className="flex-1 text-xs px-3 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700"
+                className="flex-1 text-[11px] px-3 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700"
                 onClick={confirmApply}
               >
                 Confirmar
@@ -1719,492 +2023,261 @@ function ScheduleTab({
 // ============================
 // PARTE 4 - ABA PACIENTES
 // ============================
-function PatientsTab({ schedule, inventory, onSchedule, onApply, onUndo }) {
-  const [search, setSearch] = useState("");
-  const [selectedPatient, setSelectedPatient] = useState(null);
+function PatientsTab({ schedule, inventory, onApply, onUndo }) {
+  const [search, setSearch] = React.useState("");
+  const [selectedPatient, setSelectedPatient] = React.useState(null);
 
-  // modal nova aplicação
-  const [newAppOpen, setNewAppOpen] = useState(false);
-  const [newAppDate, setNewAppDate] = useState(
-    new Date().toISOString().split("T")[0]
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  // Monta lista de pacientes a partir da agenda
+  const patientsMap = {};
+  schedule.forEach((s) => {
+    if (!s.patientName) return;
+    const key = s.patientName.trim().toLowerCase();
+    if (!patientsMap[key]) {
+      patientsMap[key] = {
+        name: s.patientName.trim(),
+        total: 0,
+        pending: 0,
+        applied: 0,
+      };
+    }
+    patientsMap[key].total++;
+    if (s.status === "applied") patientsMap[key].applied++;
+    if (s.status === "scheduled") patientsMap[key].pending++;
+  });
+
+  const patients = Object.values(patientsMap).sort((a, b) =>
+    a.name.localeCompare(b.name)
   );
-  const [newAppSessions, setNewAppSessions] = useState(1);
-  const [newAppItems, setNewAppItems] = useState([
-    { id: Date.now(), medicationId: "", dose: "" },
-  ]);
-
-  // modal aplicar
-  const [applyRecord, setApplyRecord] = useState(null);
-  const [applyDate, setApplyDate] = useState(
-    new Date().toISOString().split("T")[0]
-  );
-
-  // lista única de pacientes
-  const patients = Array.from(
-    new Set(
-      schedule.map((s) => (s.patientName || "").trim()).filter(Boolean)
-    )
-  ).sort();
 
   const filteredPatients = patients.filter((p) =>
-    p.toLowerCase().includes(search.toLowerCase())
+    p.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  const recordsForSelected =
-    selectedPatient == null
-      ? []
-      : schedule
-          .filter((s) => s.patientName === selectedPatient)
-          .sort((a, b) => {
-            const da = getScheduleDate(a)?.getTime() || 0;
-            const db = getScheduleDate(b)?.getTime() || 0;
-            return da - db;
-          });
-
-  // -------- NOVA APLICAÇÃO (form dentro do paciente) --------
-  const addNewAppLine = () => {
-    setNewAppItems((prev) => [
-      ...prev,
-      { id: Date.now() + Math.random(), medicationId: "", dose: "" },
-    ]);
-  };
-
-  const updateNewAppLine = (id, field, value) => {
-    setNewAppItems((prev) =>
-      prev.map((it) => (it.id === id ? { ...it, [field]: value } : it))
-    );
-  };
-
-  const removeNewAppLine = (id) => {
-    setNewAppItems((prev) =>
-      prev.length === 1 ? prev : prev.filter((it) => it.id !== id)
-    );
-  };
-
-  const handleCreateNewApplication = async (e) => {
-    e.preventDefault();
-    if (!selectedPatient) {
-      alert("Selecione um paciente primeiro.");
-      return;
-    }
-
-    const cleanItems = newAppItems
-      .filter((it) => it.medicationId && it.dose)
-      .map(({ id, ...rest }) => rest);
-
-    if (cleanItems.length === 0) {
-      alert("Informe ao menos um insumo e dose.");
-      return;
-    }
-
-    const totalSessions = Math.max(1, Number(newAppSessions) || 1);
-    const base = new Date(newAppDate + "T00:00:00");
-
-    for (let idx = 0; idx < totalSessions; idx++) {
-      const d = new Date(base);
-      d.setDate(base.getDate() + idx * 7);
-      const ts = Timestamp.fromDate(d);
-
-      await onSchedule({
-        patientName: selectedPatient,
-        items: cleanItems,
-        date: ts,
-        sessions: totalSessions,
-        sessionIndex: idx + 1,
-      });
-    }
-
-    setNewAppOpen(false);
-    setNewAppDate(new Date().toISOString().split("T")[0]);
-    setNewAppSessions(1);
-    setNewAppItems([{ id: Date.now(), medicationId: "", dose: "" }]);
-  };
-
-  // -------- APLICAR / DESFAZER --------
-  const openApplyModal = (rec) => {
-    setApplyRecord(rec);
-    setApplyDate(new Date().toISOString().split("T")[0]);
-  };
-
-  const confirmApply = async () => {
-    if (!applyRecord || !applyDate) return;
-    await onApply(applyRecord, applyDate);
-    setApplyRecord(null);
-  };
-
-  const handleUndoClick = async (rec) => {
-    if (!window.confirm("Deseja desfazer esta aplicação?")) return;
-    await onUndo(rec);
-  };
-
-  const renderMedsSummary = (rec) => {
-    const meds = (rec.items || []).map((it) => {
-      const inv = inventory.find((i) => i.id === it.medicationId);
-      return {
-        ...it,
-        name: inv?.name || "Insumo removido",
-        unit: inv?.unit || "",
-      };
+  // Aplicações do paciente selecionado
+  const selectedAppointments = schedule
+    .filter(
+      (s) =>
+        selectedPatient &&
+        s.patientName &&
+        s.patientName.trim().toLowerCase() ===
+          selectedPatient.trim().toLowerCase()
+    )
+    .sort((a, b) => {
+      const da = getDateFromField(a.date) || new Date(0);
+      const db = getDateFromField(b.date) || new Date(0);
+      return da - db;
     });
 
+  const renderItemsSummary = (items) => {
+    if (!items || items.length === 0) return null;
     return (
-      <ul className="mt-1 text-xs text-slate-600 space-y-0.5">
-        {meds.map((m, idx) => (
-          <li key={idx}>
-            • {m.name} —{" "}
-            <span className="font-semibold">
-              {m.dose} {m.unit}
-            </span>
-          </li>
-        ))}
-      </ul>
+      <div className="mt-0.5 space-y-0.5">
+        {items.map((it, idx) => {
+          const inv = it.medicationId
+            ? inventory.find((x) => x.id === it.medicationId)
+            : null;
+          const name = inv?.name || it.medicationName || "Insumo";
+          const unit = inv?.unit || "";
+          return (
+            <div
+              key={idx}
+              className="flex items-center gap-1.5 text-[11px] text-slate-500"
+            >
+              <Syringe size={11} className="text-slate-400" />
+              <span className="truncate">{name}</span>
+              <span className="text-slate-300">•</span>
+              <span className="font-semibold text-teal-600">
+                {it.dose} {unit}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     );
+  };
+
+  const handleApplyHere = (appt) => {
+    onApply(appt, todayStr);
+  };
+
+  const handleUndoHere = (appt) => {
+    onUndo(appt);
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* COLUNA DE PACIENTES */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm lg:col-span-1">
-        <h2 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-          <Users size={16} className="text-teal-600" />
-          Pacientes
-        </h2>
-
-        <div className="relative mb-3">
-          <Search
-            size={14}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-          />
-          <input
-            type="text"
-            placeholder="Buscar paciente..."
-            className="w-full pl-8 pr-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-
-        <div className="max-h-[380px] overflow-y-auto space-y-1">
-          {filteredPatients.length === 0 && (
-            <p className="text-xs text-slate-400 text-center py-4">
-              Nenhum paciente encontrado.
-            </p>
-          )}
-
-          {filteredPatients.map((p) => (
-            <button
-              key={p}
-              className={`w-full text-left px-3 py-2 rounded-lg text-xs ${
-                selectedPatient === p
-                  ? "bg-teal-50 text-teal-700 font-semibold border border-teal-100"
-                  : "hover:bg-slate-100 text-slate-600"
-              }`}
-              onClick={() => {
-                setSelectedPatient(p);
-                setNewAppOpen(false);
-              }}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* COLUNA DE HISTÓRICO / AÇÕES DO PACIENTE */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm lg:col-span-2">
-        {!selectedPatient && (
-          <div className="h-full flex items-center justify-center text-xs text-slate-400">
-            Selecione um paciente ao lado para ver e gerenciar o histórico.
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* LISTA DE PACIENTES */}
+      <div className="lg:col-span-1 space-y-3">
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm text-xs">
+          <h2 className="text-sm font-semibold text-slate-800 mb-2 flex items-center gap-2">
+            <Users size={15} className="text-teal-600" />
+            Pacientes
+          </h2>
+          <div className="relative mb-2">
+            <Search
+              size={13}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+            />
+            <input
+              type="text"
+              placeholder="Buscar paciente..."
+              className="w-full border border-slate-200 rounded-lg pl-7 pr-2 py-1.5 text-[11px] bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
-        )}
 
-        {selectedPatient && (
-          <div className="flex flex-col h-full">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-700">
-                  Histórico —{" "}
-                  <span className="text-teal-700">{selectedPatient}</span>
-                </h2>
-                <p className="text-[11px] text-slate-400">
-                  Visualize pendentes e aplicações já realizadas.
-                </p>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] text-slate-500">
+              {filteredPatients.length} paciente(s)
+            </span>
+          </div>
+
+          <div className="mt-2 max-h-[60vh] overflow-y-auto space-y-1.5 pr-1">
+            {filteredPatients.length === 0 && (
+              <div className="text-[11px] text-slate-400 text-center py-4">
+                Nenhum paciente encontrado.
               </div>
-              <button
-                className="px-3 py-2 text-[11px] rounded-lg bg-teal-600 text-white hover:bg-teal-700 flex items-center gap-1"
-                onClick={() => setNewAppOpen(true)}
-              >
-                <Plus size={12} /> Nova aplicação
-              </button>
-            </div>
-
-            {recordsForSelected.length === 0 && (
-              <p className="text-xs text-slate-400 text-center py-4">
-                Nenhum registro encontrado para este paciente.
-              </p>
             )}
 
-            <div className="flex-1 max-h-[420px] overflow-y-auto divide-y divide-slate-100">
-              {recordsForSelected.map((rec) => {
-                const schedDate = getScheduleDate(rec);
-                const appliedAt =
-                  rec.appliedAt?.seconds != null
-                    ? new Date(rec.appliedAt.seconds * 1000)
-                    : null;
-
-                const status =
-                  rec.status === "applied"
-                    ? "Aplicado"
-                    : rec.status === "scheduled"
-                    ? "Pendente"
-                    : rec.status || "Pendente";
-
-                return (
-                  <div
-                    key={rec.id}
-                    className="py-3 flex justify-between items-start gap-3 text-xs"
-                  >
-                    <div>
-                      <p className="font-semibold text-slate-700">
-                        Sessão{" "}
-                        {rec.sessionIndex && rec.sessions
-                          ? `${rec.sessionIndex}/${rec.sessions}`
-                          : "-"}
-                      </p>
-                      <p className="text-[11px] text-slate-500">
-                        Agendado:{" "}
-                        {schedDate
-                          ? schedDate.toLocaleDateString("pt-BR")
-                          : "Sem data"}
-                      </p>
-                      {appliedAt && (
-                        <p className="text-[11px] text-slate-400">
-                          Aplicado em:{" "}
-                          {appliedAt.toLocaleDateString("pt-BR")}{" "}
-                          {appliedAt.toLocaleTimeString("pt-BR", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </p>
-                      )}
-                      {renderMedsSummary(rec)}
-                    </div>
-
-                    <div className="flex flex-col items-end gap-1">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                          status === "Aplicado"
-                            ? "bg-teal-50 text-teal-700"
-                            : "bg-amber-50 text-amber-700"
-                        }`}
-                      >
-                        {status}
-                      </span>
-
-                      {status === "Pendente" && (
-                        <button
-                          className="mt-1 text-[11px] text-teal-700 hover:underline"
-                          onClick={() => openApplyModal(rec)}
-                        >
-                          Aplicar
-                        </button>
-                      )}
-
-                      {status === "Aplicado" && (
-                        <button
-                          className="mt-1 text-[11px] text-amber-700 hover:underline"
-                          onClick={() => handleUndoClick(rec)}
-                        >
-                          Desfazer
-                        </button>
-                      )}
-                    </div>
+            {filteredPatients.map((p) => {
+              const isSelected =
+                selectedPatient &&
+                selectedPatient.trim().toLowerCase() ===
+                  p.name.trim().toLowerCase();
+              return (
+                <button
+                  key={p.name}
+                  className={`w-full text-left px-3 py-2 rounded-lg border text-[11px] flex items-center justify-between gap-2 ${
+                    isSelected
+                      ? "border-teal-200 bg-teal-50 text-teal-700"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                  onClick={() =>
+                    setSelectedPatient(
+                      isSelected ? null : p.name.trim()
+                    )
+                  }
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold truncate">{p.name}</p>
+                    <p className="text-[10px] text-slate-400">
+                      {p.total} agendamento(s) · {p.pending} pendente(s) ·{" "}
+                      {p.applied} aplicado(s)
+                    </p>
                   </div>
-                );
-              })}
-            </div>
+                </button>
+              );
+            })}
           </div>
-        )}
+        </div>
       </div>
 
-      {/* MODAL - NOVA APLICAÇÃO */}
-      {newAppOpen && selectedPatient && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-lg w-full p-5 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-700">
-                  Nova aplicação
-                </h3>
-                <p className="text-[11px] text-slate-400">
-                  Paciente:{" "}
-                  <span className="font-semibold text-slate-700">
+      {/* DETALHES DO PACIENTE */}
+      <div className="lg:col-span-2 space-y-3">
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm text-xs min-h-[250px]">
+          {!selectedPatient && (
+            <div className="h-full flex items-center justify-center text-[11px] text-slate-400">
+              Selecione um paciente à esquerda para ver o histórico.
+            </div>
+          )}
+
+          {selectedPatient && (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-800">
                     {selectedPatient}
-                  </span>
-                </p>
-              </div>
-              <button
-                className="text-slate-400 hover:text-slate-600"
-                onClick={() => setNewAppOpen(false)}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <form
-              onSubmit={handleCreateNewApplication}
-              className="space-y-4 text-xs"
-            >
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[11px] font-semibold text-slate-600">
-                    Insumos
+                  </h2>
+                  <p className="text-[11px] text-slate-500">
+                    Todas as aplicações (pendentes e aplicadas).
                   </p>
-                  <button
-                    type="button"
-                    className="text-[11px] text-teal-700 hover:underline flex items-center gap-1"
-                    onClick={addNewAppLine}
-                  >
-                    <Plus size={10} /> Adicionar insumo
-                  </button>
                 </div>
+              </div>
 
-                {newAppItems.map((it) => (
-                  <div
-                    key={it.id}
-                    className="flex items-center gap-2 mb-2 text-xs"
-                  >
-                    <select
-                      className="flex-1 border border-slate-200 rounded-lg px-2 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                      value={it.medicationId}
-                      onChange={(e) =>
-                        updateNewAppLine(
-                          it.id,
-                          "medicationId",
-                          e.target.value
-                        )
-                      }
-                      required
+              {selectedAppointments.length === 0 && (
+                <div className="text-[11px] text-slate-400 text-center py-6">
+                  Nenhum agendamento encontrado para este paciente.
+                </div>
+              )}
+
+              <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                {selectedAppointments.map((appt) => {
+                  const dtAg = formatDateShort(appt.date);
+                  const dtAp = formatDateShort(appt.appliedAt);
+                  const isPending = appt.status === "scheduled";
+                  const isApplied = appt.status === "applied";
+
+                  const items = appt.items && appt.items.length > 0
+                    ? appt.items
+                    : [];
+
+                  return (
+                    <div
+                      key={appt.id}
+                      className="border border-slate-200 rounded-lg px-3 py-2 flex items-center justify-between gap-3 bg-slate-50"
                     >
-                      <option value="">Selecione o insumo...</option>
-                      {inventory.map((inv) => (
-                        <option key={inv.id} value={inv.id}>
-                          {inv.name} ({inv.unit})
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      step="0.1"
-                      className="w-24 border border-slate-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                      placeholder="Dose"
-                      value={it.dose}
-                      onChange={(e) =>
-                        updateNewAppLine(it.id, "dose", e.target.value)
-                      }
-                      required
-                    />
-                    {newAppItems.length > 1 && (
-                      <button
-                        type="button"
-                        className="p-1 text-red-500 hover:bg-red-50 rounded"
-                        onClick={() => removeNewAppLine(it.id)}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                              isApplied
+                                ? "bg-teal-100 text-teal-700 border border-teal-200"
+                                : "bg-amber-50 text-amber-700 border border-amber-100"
+                            }`}
+                          >
+                            {isApplied ? "Aplicado" : "Pendente"}
+                          </span>
+                          {appt.sessionInfo && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">
+                              {appt.sessionInfo}
+                            </span>
+                          )}
+                        </div>
+                        {renderItemsSummary(items)}
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-500">
+                          <span>
+                            Agendado:{" "}
+                            <strong>{dtAg || "-"}</strong>
+                          </span>
+                          {isApplied && (
+                            <span>
+                              Aplicado em:{" "}
+                              <strong>{dtAp || "-"}</strong>
+                            </span>
+                          )}
+                        </div>
+                      </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-slate-500 mb-1">
-                    Data inicial
-                  </label>
-                  <input
-                    type="date"
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                    value={newAppDate}
-                    onChange={(e) => setNewAppDate(e.target.value)}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-slate-500 mb-1">
-                    Repetições semanais
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                    value={newAppSessions}
-                    onChange={(e) => setNewAppSessions(e.target.value)}
-                  />
-                </div>
+                      <div className="flex flex-col items-end gap-1 text-[11px]">
+                        {isPending && (
+                          <button
+                            className="px-2 py-1 rounded-lg bg-teal-600 text-white hover:bg-teal-700 flex items-center gap-1"
+                            onClick={() => handleApplyHere(appt)}
+                          >
+                            Aplicar hoje
+                          </button>
+                        )}
+                        {isApplied && (
+                          <button
+                            className="px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 flex items-center gap-1"
+                            onClick={() => handleUndoHere(appt)}
+                          >
+                            <Clock size={11} />
+                            Desfazer
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-
-              <div className="flex gap-2 mt-2">
-                <button
-                  type="button"
-                  className="flex-1 text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
-                  onClick={() => setNewAppOpen(false)}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 text-xs px-3 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700"
-                >
-                  Salvar
-                </button>
-              </div>
-            </form>
-          </div>
+            </>
+          )}
         </div>
-      )}
-
-      {/* MODAL - APLICAR PENDENTE */}
-      {applyRecord && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-sm w-full p-5">
-            <h3 className="text-sm font-semibold text-slate-700 mb-2">
-              Confirmar aplicação
-            </h3>
-            <p className="text-xs text-slate-500 mb-3">
-              Paciente:{" "}
-              <span className="font-semibold text-slate-700">
-                {applyRecord.patientName}
-              </span>
-            </p>
-
-            <label className="block text-[11px] text-slate-500 mb-1">
-              Data real da aplicação
-            </label>
-            <input
-              type="date"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-              value={applyDate}
-              onChange={(e) => setApplyDate(e.target.value)}
-            />
-
-            <div className="flex gap-2">
-              <button
-                className="flex-1 text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
-                onClick={() => setApplyRecord(null)}
-              >
-                Cancelar
-              </button>
-              <button
-                className="flex-1 text-xs px-3 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700"
-                onClick={confirmApply}
-              >
-                Confirmar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -2213,232 +2286,227 @@ function PatientsTab({ schedule, inventory, onSchedule, onApply, onUndo }) {
 // PARTE 4 - ABA PLANEJAMENTO / DASHBOARD
 // ============================
 function DashboardTab({ inventory, schedule }) {
-  // monta análise simples de consumo previsto
-  const analysisByItem = {};
+  // Monta análise de consumo futuro e status
+  const analysis = {};
 
-  // inicializa com dados do estoque
+  // Inicializa com estoque atual
   inventory.forEach((item) => {
-    analysisByItem[item.id] = {
+    analysis[item.id] = {
       id: item.id,
       name: item.name,
       unit: item.unit,
-      currentStock: item.quantity || 0,
-      minStock: item.minStock || 0,
+      currentStock: Number(item.quantity) || 0,
+      minStock: Number(item.minStock) || 0,
       scheduledUsage: 0,
-      usageByDate: [], // {date, amount}
+      dailyUsage: [], // {date, amount}
+      status: "ok",
+      depletionDate: null,
     };
   });
 
-  // varre agenda futura (pendentes)
+  // Agenda futura (pendente)
   schedule
     .filter((s) => s.status === "scheduled")
     .forEach((s) => {
-      const d = getScheduleDate(s);
-      if (!d) return;
+      const baseDate = getDateFromField(s.date) || new Date();
 
-      (s.items || []).forEach((it) => {
-        const bucket = analysisByItem[it.medicationId];
+      const items =
+        s.items && s.items.length > 0 ? s.items : [];
+
+      items.forEach((it) => {
+        const bucket = analysis[it.medicationId];
         if (!bucket) return;
         const dose = Number(it.dose) || 0;
-        if (!dose) return;
-
         bucket.scheduledUsage += dose;
-        bucket.usageByDate.push({
-          date: d,
+        bucket.dailyUsage.push({
+          date: baseDate,
           amount: dose,
         });
       });
     });
 
-  // calcula status e (opcional) data de ruptura
-  const needs = Object.values(analysisByItem).map((item) => {
-    const projected = item.currentStock - item.scheduledUsage;
-    let status = "ok";
-    if (projected < 0) status = "critical";
-    else if (projected < item.minStock) status = "warning";
+  // Calcula status e data prevista de quebra
+  Object.values(analysis).forEach((item) => {
+    item.dailyUsage.sort((a, b) => a.date - b.date);
 
-    let depletionDate = null;
-    if (item.usageByDate.length > 0) {
-      let tempStock = item.currentStock;
-      const sorted = [...item.usageByDate].sort(
-        (a, b) => a.date.getTime() - b.date.getTime()
-      );
-      for (const u of sorted) {
-        tempStock -= u.amount;
-        if (tempStock < 0) {
-          depletionDate = u.date;
-          break;
-        }
+    let tempStock = item.currentStock;
+    for (const u of item.dailyUsage) {
+      tempStock -= u.amount;
+      if (tempStock < 0 && !item.depletionDate) {
+        item.depletionDate = u.date;
+        break;
       }
     }
 
-    return {
-      ...item,
-      projected,
-      status,
-      depletionDate,
-    };
+    const finalStock = item.currentStock - item.scheduledUsage;
+    if (finalStock < 0) {
+      item.status = "critical";
+    } else if (finalStock < item.minStock) {
+      item.status = "warning";
+    } else {
+      item.status = "ok";
+    }
   });
 
-  // ordena por criticidade
-  needs.sort((a, b) => {
+  const needs = Object.values(analysis).sort((a, b) => {
     const order = { critical: 0, warning: 1, ok: 2 };
     return order[a.status] - order[b.status];
   });
 
-  const countCritical = needs.filter((n) => n.status === "critical").length;
-  const countWarning = needs.filter((n) => n.status === "warning").length;
+  const criticalCount = needs.filter((n) => n.status === "critical").length;
+  const warningCount = needs.filter((n) => n.status === "warning").length;
 
   return (
-    <div className="space-y-6">
-      {/* RESUMO */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-red-50 border border-red-100 rounded-xl p-4 flex items-center gap-3">
-          <div className="bg-red-100 text-red-700 p-2 rounded-full">
-            <AlertTriangle size={20} />
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="bg-red-50 border border-red-100 rounded-xl p-4 relative overflow-hidden">
+          <div className="absolute right-2 top-2 opacity-10">
+            <AlertTriangle size={40} className="text-red-600" />
           </div>
-          <div>
-            <p className="text-[11px] uppercase font-semibold text-red-700">
-              Risco de faltar
-            </p>
-            <p className="text-2xl font-black text-red-800">{countCritical}</p>
-            <p className="text-[11px] text-red-700">
-              Itens com agenda maior que estoque
-            </p>
-          </div>
+          <p className="text-[11px] font-semibold text-red-700 uppercase tracking-wide mb-1">
+            Críticos
+          </p>
+          <p className="text-3xl font-black text-red-800 mb-1">
+            {criticalCount}
+          </p>
+          <p className="text-[11px] text-red-700">
+            Itens que irão acabar com a agenda atual.
+          </p>
         </div>
 
-        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 flex items-center gap-3">
-          <div className="bg-amber-100 text-amber-700 p-2 rounded-full">
-            <Package size={20} />
-          </div>
-          <div>
-            <p className="text-[11px] uppercase font-semibold text-amber-700">
-              Atenção / reposição
-            </p>
-            <p className="text-2xl font-black text-amber-800">{countWarning}</p>
-            <p className="text-[11px] text-amber-700">
-              Abaixo do estoque mínimo com agenda futura
-            </p>
-          </div>
+        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 relative overflow-hidden">
+          <p className="text-[11px] font-semibold text-amber-700 uppercase tracking-wide mb-1">
+            Atenção
+          </p>
+          <p className="text-3xl font-black text-amber-800 mb-1">
+            {warningCount}
+          </p>
+          <p className="text-[11px] text-amber-700">
+            Itens abaixo do estoque mínimo projetado.
+          </p>
         </div>
 
-        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center gap-3">
-          <div className="bg-slate-200 text-slate-700 p-2 rounded-full">
-            <BarChart3 size={20} />
-          </div>
-          <div>
-            <p className="text-[11px] uppercase font-semibold text-slate-600">
-              Insumos cadastrados
-            </p>
-            <p className="text-2xl font-black text-slate-800">
-              {inventory.length}
-            </p>
-            <p className="text-[11px] text-slate-500">
-              Itens ativos no estoque
-            </p>
-          </div>
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+          <p className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide mb-1">
+            Insumos cadastrados
+          </p>
+          <p className="text-3xl font-black text-slate-900 mb-1">
+            {inventory.length}
+          </p>
+          <p className="text-[11px] text-slate-500">
+            Total de insumos ativos no estoque.
+          </p>
         </div>
-      </section>
+      </div>
 
-      {/* TABELA DETALHADA */}
-      <section>
-        <h2 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+      <div className="space-y-2">
+        <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
           <BarChart3 size={16} className="text-teal-600" />
-          Previsão de consumo vs estoque
+          Previsão de consumo e compras
         </h2>
-
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
-                <th className="text-left px-3 py-2 font-semibold text-slate-600">
-                  Insumo
-                </th>
-                <th className="text-center px-3 py-2 font-semibold text-slate-600">
-                  Atual
-                </th>
-                <th className="text-center px-3 py-2 font-semibold text-slate-600">
-                  Consumo agendado
-                </th>
-                <th className="text-center px-3 py-2 font-semibold text-slate-600">
-                  Saldo projetado
-                </th>
-                <th className="text-left px-3 py-2 font-semibold text-slate-600">
-                  Situação
-                </th>
-                <th className="text-left px-3 py-2 font-semibold text-slate-600">
-                  Previsão de ruptura
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {needs.map((n) => (
-                <tr
-                  key={n.id}
-                  className="border-b border-slate-100 hover:bg-slate-50"
-                >
-                  <td className="px-3 py-2 text-slate-700">{n.name}</td>
-                  <td className="px-3 py-2 text-center text-slate-600">
-                    {n.currentStock}{" "}
-                    <span className="text-[10px] text-slate-400">
-                      {n.unit}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-center text-slate-600">
-                    {n.scheduledUsage > 0 ? (
-                      <>
-                        {n.scheduledUsage}{" "}
-                        <span className="text-[10px] text-slate-400">
-                          {n.unit}
-                        </span>
-                      </>
-                    ) : (
-                      "-"
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    <span
-                      className={`inline-flex items-center justify-center px-2 py-1 rounded-full text-[10px] font-semibold ${
-                        n.projected < 0
-                          ? "bg-red-100 text-red-700"
-                          : n.projected < n.minStock
-                          ? "bg-amber-100 text-amber-700"
-                          : "bg-teal-100 text-teal-700"
-                      }`}
-                    >
-                      {n.projected} {n.unit}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-slate-600">
-                    {n.status === "critical"
-                      ? "Crítico"
-                      : n.status === "warning"
-                      ? "Atenção"
-                      : "OK"}
-                  </td>
-                  <td className="px-3 py-2 text-slate-600">
-                    {n.depletionDate && n.status === "critical"
-                      ? n.depletionDate.toLocaleDateString("pt-BR")
-                      : "-"}
-                  </td>
-                </tr>
-              ))}
-
-              {needs.length === 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase tracking-wide text-slate-500">
                 <tr>
-                  <td
-                    colSpan={6}
-                    className="px-3 py-4 text-center text-slate-400"
-                  >
-                    Nenhum insumo encontrado para análise.
-                  </td>
+                  <th className="px-3 py-2 text-left">Insumo</th>
+                  <th className="px-3 py-2 text-center">Estoque atual</th>
+                  <th className="px-3 py-2 text-center">
+                    Uso previsto agenda
+                  </th>
+                  <th className="px-3 py-2 text-center">
+                    Saldo projetado
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    Previsão de término
+                  </th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {needs.map((item) => {
+                  const finalStock =
+                    item.currentStock - item.scheduledUsage;
+                  return (
+                    <tr key={item.id} className="hover:bg-slate-50">
+                      <td className="px-3 py-2 text-slate-700">
+                        <div className="font-semibold text-[11px]">
+                          {item.name}
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          Mínimo: {item.minStock} {item.unit}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-center text-slate-600">
+                        {item.currentStock}{" "}
+                        <span className="text-[10px] text-slate-400">
+                          {item.unit}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-center text-slate-600">
+                        {item.scheduledUsage > 0 ? (
+                          <>
+                            -{item.scheduledUsage}{" "}
+                            <span className="text-[10px] text-slate-400">
+                              {item.unit}
+                            </span>
+                          </>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <span
+                          className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            finalStock < 0
+                              ? "bg-red-100 text-red-700"
+                              : finalStock < item.minStock
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-teal-100 text-teal-700"
+                          }`}
+                        >
+                          {finalStock} {item.unit}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-[11px]">
+                        {item.status === "critical" ? (
+                          <span className="inline-flex items-center gap-1 text-red-700 font-semibold">
+                            <CalendarClock size={12} />
+                            {item.depletionDate
+                              ? `Acaba em ${item.depletionDate.toLocaleDateString(
+                                  "pt-BR"
+                                )}`
+                              : "Risco imediato"}
+                          </span>
+                        ) : item.status === "warning" ? (
+                          <span className="text-amber-700 font-semibold">
+                            Repor em breve
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-teal-700 font-semibold">
+                            <CheckCircle size={12} />
+                            OK
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {needs.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-4 text-center text-[11px] text-slate-400"
+                    >
+                      Nenhum insumo cadastrado para análise.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </section>
+      </div>
     </div>
   );
 }
