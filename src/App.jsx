@@ -555,9 +555,15 @@ export default function ClinicStockApp() {
           <DashboardTab inventory={inventory} schedule={schedule} />
         )}
 
-        {activeTab === "pacientes" && (
-          <PatientsTab schedule={schedule} inventory={inventory} />
-        )}
+      {activeTab === "pacientes" && (
+  <PatientsTab
+    schedule={schedule}
+    inventory={inventory}
+    onSchedule={handleSchedulePatient}
+    onApply={handleApply}
+    onUndo={handleUndoApply}
+  />
+)}
 
       </main>
 
@@ -1537,12 +1543,447 @@ function ScheduleTab({ inventory, schedule, onSchedule, onEdit, onApply, onUndo,
 
 
 // ---------------------------------------------------------------------------
-// PATIENTS TAB — NOVO PAINEL POR PACIENTE
+// PATIENTS TAB — PAINEL COMPLETO POR PACIENTE (CRIAR, APLICAR, DESFAZER)
 // ---------------------------------------------------------------------------
-function PatientsTab({ schedule, inventory }) {
-
+function PatientsTab({ schedule, inventory, onSchedule, onApply, onUndo }) {
   const [search, setSearch] = useState("");
   const [selectedPatient, setSelectedPatient] = useState(null);
+
+  // Modal para nova aplicação
+  const [newAppOpen, setNewAppOpen] = useState(false);
+  const [newAppDate, setNewAppDate] = useState(
+    new Date().toISOString().split("T")[0]
+  );
+  const [newAppSessions, setNewAppSessions] = useState(1);
+  const [newAppItems, setNewAppItems] = useState([
+    { id: Date.now(), medicationId: "", dose: "" },
+  ]);
+
+  // Modal para aplicar pendente
+  const [applyRecord, setApplyRecord] = useState(null);
+  const [applyDate, setApplyDate] = useState(
+    new Date().toISOString().split("T")[0]
+  );
+
+  // Lista única de pacientes
+  const patients = Array.from(
+    new Set(
+      schedule.map((s) => (s.patientName || "").trim()).filter(Boolean)
+    )
+  ).sort();
+
+  const filteredPatients = patients.filter((p) =>
+    p.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const recordsForSelected =
+    selectedPatient == null
+      ? []
+      : schedule
+          .filter((s) => s.patientName === selectedPatient)
+          .sort((a, b) => {
+            const da = getScheduleDate(a)?.getTime() || 0;
+            const db = getScheduleDate(b)?.getTime() || 0;
+            return da - db;
+          });
+
+  // ---------------- NOVA APLICAÇÃO ----------------
+
+  const addNewAppItem = () => {
+    setNewAppItems((prev) => [
+      ...prev,
+      { id: Date.now() + Math.random(), medicationId: "", dose: "" },
+    ]);
+  };
+
+  const removeNewAppItem = (id) => {
+    if (newAppItems.length === 1) return;
+    setNewAppItems((prev) => prev.filter((i) => i.id !== id));
+  };
+
+  const updateNewAppItem = (id, field, value) => {
+    setNewAppItems((prev) =>
+      prev.map((it) => (it.id === id ? { ...it, [field]: value } : it))
+    );
+  };
+
+  const handleCreateNewApplication = async (e) => {
+    e.preventDefault();
+    if (!selectedPatient) {
+      alert("Selecione um paciente primeiro.");
+      return;
+    }
+
+    const cleanItems = newAppItems.filter(
+      (i) => i.medicationId && i.dose && Number(i.dose) > 0
+    );
+    if (cleanItems.length === 0) {
+      alert("Informe pelo menos um insumo e dose.");
+      return;
+    }
+
+    const base = new Date(newAppDate + "T00:00:00");
+    const totalSessions = Math.max(1, Number(newAppSessions) || 1);
+
+    for (let idx = 0; idx < totalSessions; idx++) {
+      const d = new Date(base);
+      d.setDate(base.getDate() + idx * 7);
+      const ts = Timestamp.fromDate(d);
+
+      await onSchedule({
+        patientName: selectedPatient,
+        items: cleanItems.map(({ id, ...rest }) => rest),
+        date: ts,
+        sessionIndex: idx + 1,
+        sessions: totalSessions,
+      });
+    }
+
+    // reset modal
+    setNewAppOpen(false);
+    setNewAppDate(new Date().toISOString().split("T")[0]);
+    setNewAppSessions(1);
+    setNewAppItems([{ id: Date.now(), medicationId: "", dose: "" }]);
+  };
+
+  // ---------------- APLICAR / DESFAZER ----------------
+
+  const openApplyModal = (record) => {
+    setApplyRecord(record);
+    setApplyDate(new Date().toISOString().split("T")[0]);
+  };
+
+  const confirmApply = async () => {
+    if (!applyRecord) return;
+    await onApply(applyRecord, applyDate);
+    setApplyRecord(null);
+  };
+
+  const handleUndo = async (record) => {
+    if (!confirm("Deseja desfazer esta aplicação?")) return;
+    await onUndo(record);
+  };
+
+  // ---------------- RENDER ----------------
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* COLUNA DE PACIENTES */}
+      <div className="lg:col-span-1 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+          <Users size={16} className="text-teal-600" />
+          Pacientes
+        </h2>
+
+        <div className="relative mb-3">
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+          />
+          <input
+            type="text"
+            placeholder="Buscar paciente..."
+            className="input w-full pl-8"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+
+        <div className="max-h-[380px] overflow-y-auto space-y-1">
+          {filteredPatients.length === 0 && (
+            <p className="text-xs text-slate-400 py-4 text-center">
+              Nenhum paciente encontrado.
+            </p>
+          )}
+
+          {filteredPatients.map((p) => (
+            <button
+              key={p}
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm ${
+                selectedPatient === p
+                  ? "bg-teal-50 text-teal-700 font-semibold"
+                  : "hover:bg-slate-100 text-slate-600"
+              }`}
+              onClick={() => {
+                setSelectedPatient(p);
+                setNewAppOpen(false);
+              }}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* COLUNA DE HISTÓRICO + AÇÕES */}
+      <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+        {!selectedPatient && (
+          <div className="h-full flex items-center justify-center text-slate-400 text-sm">
+            Selecione um paciente ao lado para ver e gerenciar o histórico.
+          </div>
+        )}
+
+        {selectedPatient && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h2 className="font-semibold text-slate-700 text-base">
+                  Histórico —{" "}
+                  <span className="text-teal-700">{selectedPatient}</span>
+                </h2>
+                <p className="text-[11px] text-slate-400">
+                  Pendentes e aplicações registradas para este paciente.
+                </p>
+              </div>
+
+              <button
+                className="btn-primary text-xs px-3 py-1.5"
+                onClick={() => setNewAppOpen(true)}
+              >
+                <Plus size={12} /> Nova aplicação
+              </button>
+            </div>
+
+            {recordsForSelected.length === 0 && (
+              <p className="text-xs text-slate-400 py-4">
+                Nenhum registro encontrado para este paciente.
+              </p>
+            )}
+
+            <div className="max-h-[420px] overflow-y-auto divide-y divide-slate-100">
+              {recordsForSelected.map((rec) => {
+                const date = getScheduleDate(rec);
+                const appliedDate = rec.appliedAt?.seconds
+                  ? new Date(rec.appliedAt.seconds * 1000)
+                  : null;
+
+                const meds = (rec.items || []).map((it) => {
+                  const inv = inventory.find((i) => i.id === it.medicationId);
+                  return {
+                    ...it,
+                    name: inv?.name || "Insumo removido",
+                    unit: inv?.unit || "",
+                  };
+                });
+
+                const status =
+                  rec.status === "applied"
+                    ? "Aplicado"
+                    : rec.status === "scheduled"
+                    ? "Pendente"
+                    : rec.status || "Pendente";
+
+                return (
+                  <div key={rec.id} className="py-3 flex justify-between gap-3">
+                    <div>
+                      <p className="text-xs text-slate-500">
+                        Agendado:{" "}
+                        {date ? date.toLocaleDateString("pt-BR") : "Sem data"}
+                      </p>
+                      {appliedDate && (
+                        <p className="text-[11px] text-slate-400">
+                          Aplicado em:{" "}
+                          {appliedDate.toLocaleDateString("pt-BR")}{" "}
+                          {appliedDate.toLocaleTimeString("pt-BR", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </p>
+                      )}
+
+                      <ul className="mt-2 text-xs text-slate-600 space-y-1">
+                        {meds.map((m, idx) => (
+                          <li key={idx}>
+                            • {m.name} —{" "}
+                            <strong>
+                              {m.dose} {m.unit}
+                            </strong>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="text-right flex flex-col items-end justify-between">
+                      <span
+                        className={`text-[11px] px-2 py-0.5 rounded-full mb-1 ${
+                          status === "Aplicado"
+                            ? "bg-teal-50 text-teal-700"
+                            : "bg-amber-50 text-amber-700"
+                        }`}
+                      >
+                        {status}
+                      </span>
+
+                      {status === "Pendente" && (
+                        <button
+                          className="text-[11px] text-teal-700"
+                          onClick={() => openApplyModal(rec)}
+                        >
+                          Aplicar
+                        </button>
+                      )}
+
+                      {status === "Aplicado" && (
+                        <button
+                          className="text-[11px] text-amber-700"
+                          onClick={() => handleUndo(rec)}
+                        >
+                          Desfazer
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* MODAL NOVA APLICAÇÃO */}
+      {newAppOpen && selectedPatient && (
+        <div className="popup">
+          <div className="popup-card max-w-lg">
+            <h3 className="popup-title mb-2">
+              Nova aplicação — {selectedPatient}
+            </h3>
+
+            <form
+              onSubmit={handleCreateNewApplication}
+              className="space-y-4 mt-2"
+            >
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <p className="text-xs font-semibold text-slate-600 mb-2">
+                  Insumos
+                </p>
+
+                {newAppItems.map((it) => (
+                  <div
+                    key={it.id}
+                    className="flex items-center gap-2 mb-2 text-xs"
+                  >
+                    <select
+                      className="input flex-1"
+                      value={it.medicationId}
+                      onChange={(e) =>
+                        updateNewAppItem(it.id, "medicationId", e.target.value)
+                      }
+                      required
+                    >
+                      <option value="">Selecione...</option>
+                      {inventory.map((inv) => (
+                        <option key={inv.id} value={inv.id}>
+                          {inv.name} ({inv.unit})
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      step="0.1"
+                      className="input w-24"
+                      placeholder="Dose"
+                      value={it.dose}
+                      onChange={(e) =>
+                        updateNewAppItem(it.id, "dose", e.target.value)
+                      }
+                      required
+                    />
+                    {newAppItems.length > 1 && (
+                      <button
+                        type="button"
+                        className="icon-btn text-red-500"
+                        onClick={() => removeNewAppItem(it.id)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  className="text-[11px] text-teal-700 mt-1 flex items-center gap-1"
+                  onClick={addNewAppItem}
+                >
+                  <Plus size={10} /> Adicionar insumo
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                <div>
+                  <label className="text-slate-500">Data inicial</label>
+                  <input
+                    type="date"
+                    className="input w-full"
+                    value={newAppDate}
+                    onChange={(e) => setNewAppDate(e.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-500">Repetições (semanas)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    className="input w-full"
+                    value={newAppSessions}
+                    onChange={(e) => setNewAppSessions(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-2">
+                <button
+                  type="button"
+                  className="btn-secondary flex-1"
+                  onClick={() => setNewAppOpen(false)}
+                >
+                  Cancelar
+                </button>
+                <button type="submit" className="btn-primary flex-1">
+                  Salvar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL APLICAR PENDENTE */}
+      {applyRecord && (
+        <div className="popup">
+          <div className="popup-card max-w-sm">
+            <h3 className="popup-title mb-2">Confirmar aplicação</h3>
+            <p className="text-sm mb-3">
+              Paciente: <strong>{applyRecord.patientName}</strong>
+            </p>
+
+            <label className="text-xs text-slate-500">Data real</label>
+            <input
+              type="date"
+              className="input w-full mb-4"
+              value={applyDate}
+              onChange={(e) => setApplyDate(e.target.value)}
+            />
+
+            <div className="flex gap-3">
+              <button
+                className="btn-secondary flex-1"
+                onClick={() => setApplyRecord(null)}
+              >
+                Cancelar
+              </button>
+              <button className="btn-primary flex-1" onClick={confirmApply}>
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
   // Lista única de nomes de pacientes
   const patients = Array.from(
